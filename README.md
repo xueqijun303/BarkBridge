@@ -48,9 +48,11 @@ BarkBridge requests these permissions:
 
 Notification listener access must also be enabled manually in Android settings.
 
-## Huawei / EMUI Notes
+## Screen-Off Delivery
 
-On Huawei Mate30 / EMUI, screen-off and locked-state background networking can still be delayed by system power policy even with foreground service, wake lock, and battery optimization exemption enabled.
+BarkBridge v1.0 is designed to keep forwarding WeChat notifications and incoming-call events while the phone screen is off or locked.
+
+The app uses a foreground service, notification-listener rebinds, wake locks, background network status checks, and a resend queue so Bark pushes can continue during screen-off operation.
 
 Recommended settings:
 
@@ -60,7 +62,7 @@ Recommended settings:
 - Allow WLAN/mobile/background data for BarkBridge.
 - Keep the BarkBridge foreground-service notification enabled.
 
-If the system blocks network execution while locked, BarkBridge queues failed Bark pushes and resends them when the app is resumed, the device is unlocked, or the foreground service restarts.
+If a temporary network failure occurs, BarkBridge queues failed Bark pushes and resends them when the app is resumed, the device is unlocked, or the foreground service restarts.
 
 ## Build
 

@@ -100,7 +100,7 @@ class MainActivity : Activity() {
         header.addView(text("BarkBridge", 31f, Color.WHITE, true))
         header.addView(text("v${appVersionName()} 正式版", 14f, Color.rgb(216, 246, 241), false).withTop(4))
         header.addView(text("微信通知与来电推送到 Bark", 15f, Color.rgb(239, 255, 252), false).withTop(14))
-        header.addView(text("息屏推送 / 后台常驻 / 华为启动项快捷设置", 13f, Color.rgb(190, 229, 224), false).withTop(5))
+        header.addView(text("息屏推送 / 后台常驻 / 华为应用启动管理", 13f, Color.rgb(190, 229, 224), false).withTop(5))
         return header
     }
 
@@ -178,7 +178,7 @@ class MainActivity : Activity() {
         card.addView(button("允许后台联网").apply {
             setOnClickListener { openBackgroundDataSettings() }
         }.withTop(8))
-        card.addView(button("华为启动项手动管理").apply {
+        card.addView(button("华为应用启动管理").apply {
             setOnClickListener { openHuaweiStartupManager() }
         }.withTop(8))
         card.addView(button("打开应用后台设置").apply {
@@ -361,23 +361,29 @@ class MainActivity : Activity() {
                 "com.huawei.systemmanager",
                 "com.huawei.systemmanager.optimize.bootstart.BootStartActivity"
             )),
-            Intent("huawei.intent.action.HSM_BOOTAPP_MANAGER"),
             Intent().setComponent(ComponentName(
-                "com.huawei.systemmanager",
-                "com.huawei.systemmanager.mainscreen.MainScreenActivity"
-            ))
+                "com.android.settings",
+                "com.android.settings.Settings\$AppLaunchSettingsActivity"
+            )),
+            Intent().setComponent(ComponentName(
+                "com.android.settings",
+                "com.android.settings.Settings\$ApplicationSettingsActivity"
+            )),
+            Intent("huawei.intent.action.HSM_BOOTAPP_MANAGER")
         )
 
         for (candidate in candidates) {
             candidate.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (candidate.resolveActivity(packageManager) != null) {
+            try {
                 startActivity(candidate)
-                LogStore.add(this, "已打开华为启动项管理，请关闭自动管理并开启手动管理")
+                LogStore.add(this, "已尝试打开华为应用启动管理，请进入应用和服务-应用启动管理，将 BarkBridge 改为手动管理")
                 return
+            } catch (e: Exception) {
+                // Huawei changes this page across EMUI/HarmonyOS versions; try the next known entry.
             }
         }
 
-        LogStore.add(this, "未找到华为启动项管理入口，已打开应用后台设置")
+        LogStore.add(this, "未找到华为应用启动管理入口，已打开 BarkBridge 应用详情页")
         openAppSettings()
     }
 
@@ -400,9 +406,9 @@ class MainActivity : Activity() {
     private fun appVersionName(): String {
         return try {
             val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
-            info.versionName ?: "1.2.4"
+            info.versionName ?: "1.2.5"
         } catch (e: Exception) {
-            "1.2.4"
+            "1.2.5"
         }
     }
 

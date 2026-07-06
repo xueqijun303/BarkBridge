@@ -1,4 +1,4 @@
-# BarkBridge v1.2.4
+# BarkBridge v1.2.5
 
 BarkBridge 是一款 Android 工具，可以把选定的微信通知和来电事件转发到 Bark。
 
@@ -30,6 +30,14 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 支持本地属性或 GitHub Secrets 发布签名 / Optional release signing through local properties or GitHub Secrets
 
 ## 最新变化 / What's New
+
+### v1.2.5
+
+- 修正华为应用启动管理跳转逻辑，避免跳到手机管家主屏幕。
+- 优先尝试“应用和服务 - 应用启动管理”相关入口，失败时再回到 BarkBridge 应用详情页。
+
+- Fixed the Huawei app launch-management shortcut so it no longer falls back to the Phone Manager home screen.
+- The app now prioritizes entries related to "Apps and services - App launch management" and only falls back to BarkBridge app details if those entries fail.
 
 ### v1.2.4
 
@@ -76,8 +84,8 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 The current APK artifacts are included at:
 
 ```text
-release/BarkBridge_v1.2.4-debug.apk
-release/BarkBridge_v1.2.4-release-unsigned.apk
+release/BarkBridge_v1.2.5-debug.apk
+release/BarkBridge_v1.2.5-release-unsigned.apk
 ```
 
 Debug APK 可直接用于测试安装。未签名 release APK 需要签名后再公开分发。
@@ -113,9 +121,9 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## 息屏推送 / Screen-Off Delivery
 
-BarkBridge v1.2.4 的目标是在手机息屏或锁屏时继续转发微信通知和来电事件。
+BarkBridge v1.2.5 的目标是在手机息屏或锁屏时继续转发微信通知和来电事件。
 
-BarkBridge v1.2.4 is designed to keep forwarding WeChat notifications and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.2.5 is designed to keep forwarding WeChat notifications and incoming-call events while the phone screen is off or locked.
 
 App 使用前台服务、通知监听重绑、唤醒锁、后台联网状态检测和失败补发队列，让 Bark 推送在息屏期间尽量保持可用。
 
@@ -190,6 +198,6 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-推送类似 `v1.2.4` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
+推送类似 `v1.2.5` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
 
-Pushing a tag such as `v1.2.4` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.2.5` builds APKs and publishes them to the GitHub Release page automatically.

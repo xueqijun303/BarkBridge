@@ -47,11 +47,11 @@ jobs:
       - name: Collect APKs
         run: |
           mkdir -p artifacts
-          cp app/build/outputs/apk/debug/app-debug.apk artifacts/BarkBridge_v1.2.4-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk artifacts/BarkBridge_v1.2.5-debug.apk
           if [ -f app/build/outputs/apk/release/app-release.apk ]; then
-            cp app/build/outputs/apk/release/app-release.apk artifacts/BarkBridge_v1.2.4-release.apk
+            cp app/build/outputs/apk/release/app-release.apk artifacts/BarkBridge_v1.2.5-release.apk
           elif [ -f app/build/outputs/apk/release/app-release-unsigned.apk ]; then
-            cp app/build/outputs/apk/release/app-release-unsigned.apk artifacts/BarkBridge_v1.2.4-release-unsigned.apk
+            cp app/build/outputs/apk/release/app-release-unsigned.apk artifacts/BarkBridge_v1.2.5-release-unsigned.apk
           fi
 
       - name: Upload build artifacts

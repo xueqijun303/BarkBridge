@@ -2,12 +2,14 @@ package com.xueqijun.barkbridge
 
 import android.Manifest
 import android.app.Activity
+import android.content.res.ColorStateList
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
@@ -73,13 +75,12 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        root.setPadding(dp(20), dp(24), dp(20), dp(28))
+        root.setPadding(dp(18), dp(20), dp(18), dp(28))
         scroll.addView(root)
 
-        root.addView(text("BarkBridge", 30f, Color.rgb(17, 29, 28), true))
-        root.addView(text("v${appVersionName()} 正式版", 14f, Muted, false).withTop(4))
+        root.addView(buildHeader())
 
-        root.addView(buildBarkCard().withTop(22))
+        root.addView(buildBarkCard().withTop(16))
         root.addView(buildPermissionCard().withTop(14))
         root.addView(buildPrivacyCard().withTop(14))
         root.addView(buildRulesCard().withTop(14))
@@ -89,9 +90,23 @@ class MainActivity : Activity() {
         return scroll
     }
 
+    private fun buildHeader(): LinearLayout {
+        val header = LinearLayout(this)
+        header.orientation = LinearLayout.VERTICAL
+        header.setPadding(dp(20), dp(22), dp(20), dp(20))
+        header.background = roundedRect(Primary, 0, Primary, 8)
+        header.elevation = dp(2).toFloat()
+
+        header.addView(text("BarkBridge", 31f, Color.WHITE, true))
+        header.addView(text("v${appVersionName()} 正式版", 14f, Color.rgb(216, 246, 241), false).withTop(4))
+        header.addView(text("微信通知与来电推送到 Bark", 15f, Color.rgb(239, 255, 252), false).withTop(14))
+        header.addView(text("息屏推送 / 后台常驻 / 华为启动项快捷设置", 13f, Color.rgb(190, 229, 224), false).withTop(5))
+        return header
+    }
+
     private fun buildBarkCard(): LinearLayout {
         val card = card()
-        card.addView(text("Bark 配置", 16f, OnCard, true))
+        card.addView(sectionTitle("Bark 配置"))
         card.addView(input("Bark Key 或完整 URL", AppSettings.barkKey(this)) {
             AppSettings.setBarkKey(this, it)
             refreshStatus()
@@ -124,7 +139,7 @@ class MainActivity : Activity() {
 
     private fun buildPermissionCard(): LinearLayout {
         val card = card()
-        card.addView(text("权限检测", 16f, OnCard, true))
+        card.addView(sectionTitle("权限检测"))
         notificationStatus = statusLine()
         phoneStatus = statusLine()
         phoneNumberStatus = statusLine()
@@ -174,7 +189,7 @@ class MainActivity : Activity() {
 
     private fun buildPrivacyCard(): LinearLayout {
         val card = card()
-        card.addView(text("日志与隐私", 16f, OnCard, true))
+        card.addView(sectionTitle("日志与隐私"))
         card.addView(check("诊断模式：显示屏幕/重绑等系统事件", AppSettings.diagnosticLogs(this)) {
             AppSettings.setDiagnosticLogs(this, it)
             refreshStatus()
@@ -191,7 +206,7 @@ class MainActivity : Activity() {
 
     private fun buildRulesCard(): LinearLayout {
         val card = card()
-        card.addView(text("微信过滤规则", 16f, OnCard, true))
+        card.addView(sectionTitle("微信过滤规则"))
         card.addView(check("屏蔽群聊消息", AppSettings.blockGroupChats(this)) {
             AppSettings.setBlockGroupChats(this, it)
         }.withTop(10))
@@ -209,7 +224,7 @@ class MainActivity : Activity() {
 
     private fun buildFeatureCard(): LinearLayout {
         val card = card()
-        card.addView(text("功能状态", 16f, OnCard, true))
+        card.addView(sectionTitle("功能状态"))
         card.addView(text("微信通知监听 / 消息详情推送 Bark", 14f, OnCard, false).withTop(12))
         card.addView(text("来电推送 Bark / 联系人名称匹配", 14f, OnCard, false).withTop(8))
         card.addView(text("后台常驻 / 开机自启动 / 失败补发", 14f, OnCard, false).withTop(8))
@@ -224,8 +239,11 @@ class MainActivity : Activity() {
 
     private fun buildLogCard(): LinearLayout {
         val card = card()
-        card.addView(text("最近记录", 16f, OnCard, true))
+        card.addView(sectionTitle("最近记录"))
         logView = text("", 13f, Muted, false)
+        logView.setPadding(dp(12), dp(10), dp(12), dp(10))
+        logView.background = roundedRect(InputFill, 1, Border, 8)
+        logView.setLineSpacing(dp(2).toFloat(), 1f)
         card.addView(logView.withTop(10))
         card.addView(button("清空日志").apply {
             setOnClickListener {
@@ -237,15 +255,15 @@ class MainActivity : Activity() {
     }
 
     private fun refreshStatus() {
-        notificationStatus.text = marker(isNotificationListenerEnabled()) + " 微信通知监听"
-        phoneStatus.text = marker(hasPhoneStatePermission()) + " 电话状态权限"
-        phoneNumberStatus.text = marker(hasCallNumberPermission()) + " 来电号码权限"
-        contactsStatus.text = marker(hasContactsPermission()) + " 联系人匹配权限"
-        postNotificationStatus.text = marker(hasPostNotificationPermission()) + " 前台服务通知权限"
-        batteryStatus.text = marker(isIgnoringBatteryOptimizations()) + " 忽略电池优化"
-        backgroundDataStatus.text = marker(isBackgroundDataAllowed()) + " 后台联网不受限"
-        serviceStatus.text = marker(AppSettings.barkKey(this).isNotBlank()) + " Bark Key 已配置"
-        pendingStatus.text = "待补发 ${PendingPushes.count(this)} 条"
+        setStatusLine(notificationStatus, isNotificationListenerEnabled(), "微信通知监听")
+        setStatusLine(phoneStatus, hasPhoneStatePermission(), "电话状态权限")
+        setStatusLine(phoneNumberStatus, hasCallNumberPermission(), "来电号码权限")
+        setStatusLine(contactsStatus, hasContactsPermission(), "联系人匹配权限")
+        setStatusLine(postNotificationStatus, hasPostNotificationPermission(), "前台服务通知权限")
+        setStatusLine(batteryStatus, isIgnoringBatteryOptimizations(), "忽略电池优化")
+        setStatusLine(backgroundDataStatus, isBackgroundDataAllowed(), "后台联网不受限")
+        setStatusLine(serviceStatus, AppSettings.barkKey(this).isNotBlank(), "Bark Key 已配置")
+        setNeutralStatusLine(pendingStatus, "待补发 ${PendingPushes.count(this)} 条")
         logView.text = LogStore.get(this).ifBlank { "暂无记录" }
     }
 
@@ -382,9 +400,9 @@ class MainActivity : Activity() {
     private fun appVersionName(): String {
         return try {
             val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
-            info.versionName ?: "1.2.3"
+            info.versionName ?: "1.2.4"
         } catch (e: Exception) {
-            "1.2.3"
+            "1.2.4"
         }
     }
 
@@ -394,7 +412,11 @@ class MainActivity : Activity() {
             setText(value)
             setSingleLine(true)
             textSize = 15f
-            setPadding(dp(14), dp(8), dp(14), dp(8))
+            setTextColor(OnCard)
+            setHintTextColor(Subtle)
+            minHeight = dp(48)
+            setPadding(dp(14), dp(6), dp(14), dp(6))
+            background = roundedRect(InputFill, 1, Border, 8)
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -411,21 +433,17 @@ class MainActivity : Activity() {
             textSize = 14f
             setTextColor(OnCard)
             isChecked = checked
+            buttonTintList = ColorStateList.valueOf(Primary)
             setOnCheckedChangeListener { _, value -> onChange(value) }
         }
     }
 
-    private fun marker(ok: Boolean): String = if (ok) "OK" else "未开启"
-
     private fun card(): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(16), dp(18), dp(16))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                color = android.content.res.ColorStateList.valueOf(Color.WHITE)
-                cornerRadius = dp(8).toFloat()
-                setStroke(1, Color.rgb(222, 229, 227))
-            }
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+            background = roundedRect(Color.WHITE, 1, Border, 8)
+            elevation = dp(1).toFloat()
         }
     }
 
@@ -436,12 +454,44 @@ class MainActivity : Activity() {
             isAllCaps = false
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            setBackgroundColor(Primary)
-            minHeight = dp(46)
+            background = roundedRect(Primary, 0, Primary, 8)
+            minHeight = dp(48)
+            minWidth = 0
+            setPadding(dp(14), 0, dp(14), 0)
         }
     }
 
-    private fun statusLine(): TextView = text("", 14f, OnCard, false)
+    private fun sectionTitle(value: String): TextView {
+        return text(value, 17f, OnCard, true).apply {
+            setPadding(0, 0, 0, dp(2))
+        }
+    }
+
+    private fun statusLine(): TextView {
+        return text("", 14f, OnCard, false).apply {
+            minHeight = dp(36)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+        }
+    }
+
+    private fun setStatusLine(view: TextView, ok: Boolean, label: String) {
+        val status = if (ok) "已开启" else "未开启"
+        view.text = "$status  $label"
+        view.setTextColor(if (ok) SuccessText else WarningText)
+        view.background = roundedRect(
+            if (ok) SuccessFill else WarningFill,
+            1,
+            if (ok) SuccessBorder else WarningBorder,
+            8
+        )
+    }
+
+    private fun setNeutralStatusLine(view: TextView, label: String) {
+        view.text = label
+        view.setTextColor(Muted)
+        view.background = roundedRect(InputFill, 1, Border, 8)
+    }
 
     private fun text(value: String, size: Float, color: Int, bold: Boolean): TextView {
         return TextView(this).apply {
@@ -461,13 +511,30 @@ class MainActivity : Activity() {
         return this
     }
 
+    private fun roundedRect(color: Int, strokeWidth: Int, strokeColor: Int, radius: Int): GradientDrawable {
+        return GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = dp(radius).toFloat()
+            if (strokeWidth > 0) setStroke(dp(strokeWidth), strokeColor)
+        }
+    }
+
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     companion object {
         private const val RUNTIME_PERMISSION_REQUEST = 1001
-        private val Surface = Color.rgb(247, 250, 249)
-        private val Primary = Color.rgb(0, 106, 106)
+        private val Surface = Color.rgb(241, 247, 246)
+        private val Primary = Color.rgb(0, 118, 112)
         private val OnCard = Color.rgb(25, 32, 31)
         private val Muted = Color.rgb(82, 96, 94)
+        private val Subtle = Color.rgb(123, 137, 134)
+        private val Border = Color.rgb(218, 228, 225)
+        private val InputFill = Color.rgb(247, 250, 249)
+        private val SuccessFill = Color.rgb(232, 247, 241)
+        private val SuccessBorder = Color.rgb(182, 224, 206)
+        private val SuccessText = Color.rgb(22, 102, 75)
+        private val WarningFill = Color.rgb(255, 246, 232)
+        private val WarningBorder = Color.rgb(239, 204, 142)
+        private val WarningText = Color.rgb(132, 82, 16)
     }
 }

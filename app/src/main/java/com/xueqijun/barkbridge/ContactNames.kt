@@ -1,4 +1,4 @@
-package com.example.barkbridge
+package com.xueqijun.barkbridge
 
 import android.Manifest
 import android.content.Context

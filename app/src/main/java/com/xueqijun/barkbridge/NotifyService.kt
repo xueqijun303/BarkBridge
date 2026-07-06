@@ -1,5 +1,5 @@
 
-package com.example.barkbridge
+package com.xueqijun.barkbridge
 
 import android.app.Notification
 import android.service.notification.NotificationListenerService

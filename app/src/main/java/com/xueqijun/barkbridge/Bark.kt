@@ -1,5 +1,5 @@
 
-package com.example.barkbridge
+package com.xueqijun.barkbridge
 
 import android.content.Context
 import java.net.URL
@@ -24,7 +24,7 @@ object Bark {
                 conn.requestMethod="GET"
                 conn.connectTimeout=10000
                 conn.readTimeout=10000
-                conn.setRequestProperty("User-Agent", "BarkBridge/1.0 Android")
+                conn.setRequestProperty("User-Agent", "BarkBridge/1.1 Android")
 
                 val code = conn.responseCode
                 val response = readResponse(conn)

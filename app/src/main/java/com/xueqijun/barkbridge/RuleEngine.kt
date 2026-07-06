@@ -1,5 +1,5 @@
 
-package com.example.barkbridge
+package com.xueqijun.barkbridge
 
 object RuleEngine {
 

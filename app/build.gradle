@@ -3,16 +3,47 @@ plugins {
     id "org.jetbrains.kotlin.android"
 }
 
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { localProperties.load(it) }
+}
+
+def signingValue = { String name ->
+    return System.getenv(name) ?: localProperties.getProperty(name)
+}
+
 android {
-    namespace "com.example.barkbridge"
+    namespace "com.xueqijun.barkbridge"
     compileSdk 35
 
     defaultConfig {
-        applicationId "com.example.barkbridge"
+        applicationId "com.xueqijun.barkbridge"
         minSdk 26
         targetSdk 35
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "1.1"
+    }
+
+    signingConfigs {
+        release {
+            def storeFilePath = signingValue("BARKBRIDGE_STORE_FILE")
+            if (storeFilePath) {
+                storeFile file(storeFilePath)
+                storePassword signingValue("BARKBRIDGE_STORE_PASSWORD")
+                keyAlias signingValue("BARKBRIDGE_KEY_ALIAS")
+                keyPassword signingValue("BARKBRIDGE_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (signingValue("BARKBRIDGE_STORE_FILE")) {
+                signingConfig signingConfigs.release
+            }
+            minifyEnabled false
+        }
     }
 
     compileOptions {

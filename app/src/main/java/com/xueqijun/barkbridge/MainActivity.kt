@@ -1,10 +1,11 @@
-package com.example.barkbridge
+package com.xueqijun.barkbridge
 
 import android.Manifest
 import android.app.Activity
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.PackageInfo
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.ConnectivityManager
@@ -75,7 +76,7 @@ class MainActivity : Activity() {
         scroll.addView(root)
 
         root.addView(text("BarkBridge", 30f, Color.rgb(17, 29, 28), true))
-        root.addView(text("v1.0 正式版", 14f, Muted, false).withTop(4))
+        root.addView(text("v${appVersionName()} 正式版", 14f, Muted, false).withTop(4))
 
         val keyCard = card()
         keyCard.addView(text("Bark Key", 16f, OnCard, true))
@@ -97,7 +98,7 @@ class MainActivity : Activity() {
         val testButton = button("发送测试 Bark")
         testButton.setOnClickListener {
             LogStore.add(this, "开始发送测试 Bark")
-            Bark.send(this, Prefs.get(this, "key"), "BarkBridge", "v1.0 测试推送")
+            Bark.send(this, Prefs.get(this, "key"), "BarkBridge", "v${appVersionName()} 测试推送")
             refreshStatus()
             uiHandler.postDelayed({ refreshStatus() }, 1500)
             uiHandler.postDelayed({ refreshStatus() }, 4000)
@@ -163,6 +164,9 @@ class MainActivity : Activity() {
         featureCard.addView(text("微信通知监听 / 消息详情推送 Bark", 14f, OnCard, false).withTop(12))
         featureCard.addView(text("来电推送 Bark / 后台常驻服务", 14f, OnCard, false).withTop(8))
         featureCard.addView(text("配置自动保存 / 开机自启动", 14f, OnCard, false).withTop(8))
+        val releaseButton = button("查看 GitHub 最新版本")
+        releaseButton.setOnClickListener { openLatestRelease() }
+        featureCard.addView(releaseButton.withTop(12))
         root.addView(featureCard.withTop(14))
 
         val logCard = card()
@@ -283,6 +287,20 @@ class MainActivity : Activity() {
         val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
         intent.data = Uri.parse("package:$packageName")
         startActivity(intent)
+    }
+
+    private fun openLatestRelease() {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/xueqijun303/BarkBridge/releases"))
+        startActivity(intent)
+    }
+
+    private fun appVersionName(): String {
+        return try {
+            val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
+            info.versionName ?: "1.1"
+        } catch (e: Exception) {
+            "1.1"
+        }
     }
 
     private fun marker(ok: Boolean): String = if (ok) "OK" else "未开启"

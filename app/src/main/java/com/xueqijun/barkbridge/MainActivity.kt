@@ -213,6 +213,9 @@ class MainActivity : Activity() {
         card.addView(button("查看 GitHub 最新版本").apply {
             setOnClickListener { openLatestRelease() }
         }.withTop(12))
+        card.addView(button("加入讨论").apply {
+            setOnClickListener { openDiscussionChannel() }
+        }.withTop(8))
         return card
     }
 
@@ -334,12 +337,17 @@ class MainActivity : Activity() {
         startActivity(intent)
     }
 
+    private fun openDiscussionChannel() {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/+ellGuRWC5NE4ZGY9"))
+        startActivity(intent)
+    }
+
     private fun appVersionName(): String {
         return try {
             val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
-            info.versionName ?: "1.2"
+            info.versionName ?: "1.2.2"
         } catch (e: Exception) {
-            "1.2"
+            "1.2.2"
         }
     }
 

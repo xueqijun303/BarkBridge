@@ -1,4 +1,4 @@
-# BarkBridge v1.2.2
+# BarkBridge v1.2.3
 
 BarkBridge is an Android utility that forwards selected WeChat notifications and incoming-call events to Bark.
 
@@ -22,9 +22,15 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - Permission status checks
 - Material Design 3 style native UI
 - Telegram discussion channel entry
+- Huawei app launch manual-management shortcut
 - Android 8 to Android 15 target range
 - GitHub Actions APK builds
 - Optional release signing through local properties or GitHub Secrets
+
+## What's New in v1.2.3
+
+- Added a Huawei startup-management shortcut in the permission section.
+- The shortcut helps jump to Huawei Phone Manager so BarkBridge can be changed from automatic launch management to manual management.
 
 ## What's New in v1.2.2
 
@@ -44,8 +50,8 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 The current APK artifacts are included at:
 
 ```text
-release/BarkBridge_v1.2.2-debug.apk
-release/BarkBridge_v1.2.2-release-unsigned.apk
+release/BarkBridge_v1.2.3-debug.apk
+release/BarkBridge_v1.2.3-release-unsigned.apk
 ```
 
 Debug APKs can be installed for testing. The unsigned release APK must be signed before public distribution.
@@ -73,7 +79,7 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## Screen-Off Delivery
 
-BarkBridge v1.2.2 is designed to keep forwarding WeChat notifications and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.2.3 is designed to keep forwarding WeChat notifications and incoming-call events while the phone screen is off or locked.
 
 The app uses a foreground service, notification-listener rebinds, wake locks, background network status checks, and a resend queue so Bark pushes can continue during screen-off operation.
 
@@ -81,7 +87,7 @@ Recommended settings:
 
 - Enable BarkBridge notification listener access.
 - Allow BarkBridge to ignore battery optimization.
-- In Huawei app launch management, enable auto-launch, secondary launch, and background activity.
+- In Huawei app launch management, turn off automatic management for BarkBridge, then manually enable auto-launch, secondary launch, and background activity.
 - Allow WLAN/mobile/background data for BarkBridge.
 - Keep the BarkBridge foreground-service notification enabled.
 - In BarkBridge, enable diagnostic mode only when troubleshooting; normal use can keep it off.
@@ -130,4 +136,4 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-Pushing a tag such as `v1.2.2` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.2.3` builds APKs and publishes them to the GitHub Release page automatically.

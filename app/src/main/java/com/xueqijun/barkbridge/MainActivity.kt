@@ -163,6 +163,9 @@ class MainActivity : Activity() {
         card.addView(button("允许后台联网").apply {
             setOnClickListener { openBackgroundDataSettings() }
         }.withTop(8))
+        card.addView(button("华为启动项手动管理").apply {
+            setOnClickListener { openHuaweiStartupManager() }
+        }.withTop(8))
         card.addView(button("打开应用后台设置").apply {
             setOnClickListener { openAppSettings() }
         }.withTop(8))
@@ -326,6 +329,40 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun openHuaweiStartupManager() {
+        val candidates = listOf(
+            Intent().setComponent(ComponentName(
+                "com.huawei.systemmanager",
+                "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"
+            )),
+            Intent().setComponent(ComponentName(
+                "com.huawei.systemmanager",
+                "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity"
+            )),
+            Intent().setComponent(ComponentName(
+                "com.huawei.systemmanager",
+                "com.huawei.systemmanager.optimize.bootstart.BootStartActivity"
+            )),
+            Intent("huawei.intent.action.HSM_BOOTAPP_MANAGER"),
+            Intent().setComponent(ComponentName(
+                "com.huawei.systemmanager",
+                "com.huawei.systemmanager.mainscreen.MainScreenActivity"
+            ))
+        )
+
+        for (candidate in candidates) {
+            candidate.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (candidate.resolveActivity(packageManager) != null) {
+                startActivity(candidate)
+                LogStore.add(this, "已打开华为启动项管理，请关闭自动管理并开启手动管理")
+                return
+            }
+        }
+
+        LogStore.add(this, "未找到华为启动项管理入口，已打开应用后台设置")
+        openAppSettings()
+    }
+
     private fun openAppSettings() {
         val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
         intent.data = Uri.parse("package:$packageName")
@@ -345,9 +382,9 @@ class MainActivity : Activity() {
     private fun appVersionName(): String {
         return try {
             val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
-            info.versionName ?: "1.2.2"
+            info.versionName ?: "1.2.3"
         } catch (e: Exception) {
-            "1.2.2"
+            "1.2.3"
         }
     }
 

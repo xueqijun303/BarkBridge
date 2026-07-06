@@ -18,7 +18,7 @@ object Prefs {
         ctx.getSharedPreferences(SP,0).edit().putBoolean(k,v).apply()
     }
 
-    fun getBool(ctx: Context, k: String): Boolean {
-        return ctx.getSharedPreferences(SP,0).getBoolean(k,false)
+    fun getBool(ctx: Context, k: String, defaultValue: Boolean = false): Boolean {
+        return ctx.getSharedPreferences(SP,0).getBoolean(k,defaultValue)
     }
 }

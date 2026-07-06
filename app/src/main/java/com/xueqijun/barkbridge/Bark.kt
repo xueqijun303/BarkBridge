@@ -19,12 +19,12 @@ object Bark {
             val wakeLock = WakeLocks.acquireSendLock(ctx)
             var conn: HttpURLConnection? = null
             try{
-                val url = URL(buildUrl(config, title, body))
+                val url = URL(buildUrl(ctx, config, title, body))
                 conn = url.openConnection() as HttpURLConnection
                 conn.requestMethod="GET"
                 conn.connectTimeout=10000
                 conn.readTimeout=10000
-                conn.setRequestProperty("User-Agent", "BarkBridge/1.1 Android")
+                conn.setRequestProperty("User-Agent", "BarkBridge/1.2 Android")
 
                 val code = conn.responseCode
                 val response = readResponse(conn)
@@ -48,7 +48,7 @@ object Bark {
         if(key.isBlank()) return
         Thread{
             try{
-                val url = URL(buildUrl(key.trim(), title, body))
+                val url = URL(buildUrl(null, key.trim(), title, body))
                 val conn = url.openConnection() as HttpURLConnection
                 conn.requestMethod="GET"
                 conn.connectTimeout=10000
@@ -59,17 +59,33 @@ object Bark {
         }.start()
     }
 
-    private fun buildUrl(config: String, title: String, body: String): String {
+    private fun buildUrl(ctx: Context?, config: String, title: String, body: String): String {
         val base = if(config.startsWith("http://") || config.startsWith("https://")){
             config.trimEnd('/')
         }else{
-            "https://api.day.app/${encode(config)}"
+            val server = ctx?.let { AppSettings.barkServer(it) } ?: "https://api.day.app"
+            "${server.trimEnd('/')}/${encode(config)}"
         }
-        return "$base/${encode(title)}/${encode(body)}"
+        val query = ctx?.let { barkQuery(it) }.orEmpty()
+        return "$base/${encode(title)}/${encode(body)}$query"
     }
 
     private fun encode(value: String): String {
         return URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+    }
+
+    private fun barkQuery(ctx: Context): String {
+        val params = mutableListOf<Pair<String, String>>()
+        val group = AppSettings.barkGroup(ctx)
+        if (group.isNotBlank()) params.add("group" to group)
+        val sound = AppSettings.barkSound(ctx)
+        if (sound.isNotBlank()) params.add("sound" to sound)
+        val icon = AppSettings.barkIcon(ctx)
+        if (icon.isNotBlank()) params.add("icon" to icon)
+        val level = AppSettings.barkLevel(ctx)
+        if (level.isNotBlank()) params.add("level" to level)
+        if (params.isEmpty()) return ""
+        return params.joinToString(prefix = "?", separator = "&") { "${encode(it.first)}=${encode(it.second)}" }
     }
 
     private fun readResponse(conn: HttpURLConnection): String {

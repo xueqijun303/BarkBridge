@@ -1,4 +1,4 @@
-# BarkBridge v1.1
+# BarkBridge v1.2
 
 BarkBridge is an Android utility that forwards selected WeChat notifications and incoming-call events to Bark.
 
@@ -9,30 +9,43 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - Incoming-call forwarding to Bark
 - Contact-name lookup for incoming calls
 - Graphical Bark Key configuration
+- Custom Bark server, group, sound, icon, and interruption level
 - Automatic configuration persistence
 - Boot startup receiver
 - Foreground service
 - Notification listener rebind helper
 - Wake lock for screen-off operation
 - Delayed resend queue for failed Bark requests
+- WeChat keyword/contact filtering
+- Optional group-chat blocking
+- Timestamped logs with privacy controls
 - Permission status checks
 - Material Design 3 style native UI
 - Android 8 to Android 15 target range
 - GitHub Actions APK builds
 - Optional release signing through local properties or GitHub Secrets
 
+## What's New in v1.2
+
+- Quieter logs by default. Screen, rebind, duplicate-call, and other troubleshooting records are hidden unless diagnostic mode is enabled.
+- Every visible log line includes a timestamp for easier testing.
+- Privacy controls can mask phone numbers in logs and disable WeChat message-body logging.
+- Bark delivery can be configured with a custom server, group, sound, icon, and interruption level.
+- WeChat forwarding rules support blocked keywords, important keywords, allowed contacts/keywords, and optional group-chat blocking.
+- The main screen is organized into clearer sections for Bark configuration, permissions, privacy, filters, status, and recent records.
+
 ## Current APK
 
 The current APK artifacts are included at:
 
 ```text
-release/BarkBridge_v1.1-debug.apk
-release/BarkBridge_v1.1-release-unsigned.apk
+release/BarkBridge_v1.2-debug.apk
+release/BarkBridge_v1.2-release-unsigned.apk
 ```
 
 Debug APKs can be installed for testing. The unsigned release APK must be signed before public distribution.
 
-Note: v1.1 changes the Android package from `com.example.barkbridge` to `com.xueqijun.barkbridge`, so it installs as a new app instead of upgrading the older debug build.
+Note: current builds use Android package `com.xueqijun.barkbridge`. Older v1.0 debug builds used `com.example.barkbridge`, so those older APKs install as a separate app instead of upgrading in place.
 
 ## Permissions
 
@@ -55,7 +68,7 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## Screen-Off Delivery
 
-BarkBridge v1.1 is designed to keep forwarding WeChat notifications and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.2 is designed to keep forwarding WeChat notifications and incoming-call events while the phone screen is off or locked.
 
 The app uses a foreground service, notification-listener rebinds, wake locks, background network status checks, and a resend queue so Bark pushes can continue during screen-off operation.
 
@@ -66,6 +79,7 @@ Recommended settings:
 - In Huawei app launch management, enable auto-launch, secondary launch, and background activity.
 - Allow WLAN/mobile/background data for BarkBridge.
 - Keep the BarkBridge foreground-service notification enabled.
+- In BarkBridge, enable diagnostic mode only when troubleshooting; normal use can keep it off.
 
 If a temporary network failure occurs, BarkBridge queues failed Bark pushes and resends them when the app is resumed, the device is unlocked, or the foreground service restarts.
 
@@ -111,4 +125,4 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-Pushing a tag such as `v1.1.0` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.2.0` builds APKs and publishes them to the GitHub Release page automatically.

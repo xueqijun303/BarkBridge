@@ -34,17 +34,25 @@ class NotifyService: NotificationListenerService() {
 
         val full = "$title $text"
 
-        if(RuleEngine.shouldDrop(full)) return
+        if(RuleEngine.shouldDrop(applicationContext, title, text)) {
+            LogStore.add(applicationContext, "微信通知已按规则过滤", diagnostic = true)
+            return
+        }
 
-        val key = Prefs.get(applicationContext,"key")
+        val key = AppSettings.barkKey(applicationContext)
 
-        val msg = if(RuleEngine.isImportant(full))
+        val msg = if(RuleEngine.isImportant(applicationContext, full))
             "🔥 "+AI.summary(full)
         else
             AI.summary(full)
 
         Bark.send(applicationContext,key,"微信消息",msg)
 
-        LogStore.add(applicationContext, full)
+        val logText = if (AppSettings.saveMessageBody(applicationContext)) {
+            full
+        } else {
+            "微信消息已推送"
+        }
+        LogStore.add(applicationContext, logText)
     }
 }

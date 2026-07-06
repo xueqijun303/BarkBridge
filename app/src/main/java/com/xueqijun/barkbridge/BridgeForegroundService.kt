@@ -22,9 +22,11 @@ class BridgeForegroundService : Service() {
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val action = intent.action ?: return
-            LogStore.add(context, "屏幕状态: $action")
+            LogStore.add(context, "屏幕状态: $action", diagnostic = true)
             PendingPushes.flush(context, action)
-            requestNotificationListenerRebind(context)
+            if (action == Intent.ACTION_USER_PRESENT) {
+                requestNotificationListenerRebind(context)
+            }
         }
     }
     private val rebindRunnable = object : Runnable {
@@ -133,7 +135,7 @@ class BridgeForegroundService : Service() {
             try {
                 val component = ComponentName(context, NotifyService::class.java)
                 NotificationListenerService.requestRebind(component)
-                LogStore.add(context, "已请求重绑微信通知监听")
+                LogStore.add(context, "已请求重绑微信通知监听", diagnostic = true)
             } catch (e: Exception) {
                 LogStore.add(context, "重绑通知监听失败: ${e.javaClass.simpleName}")
             }

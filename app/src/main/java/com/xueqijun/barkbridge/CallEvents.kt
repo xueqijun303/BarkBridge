@@ -14,7 +14,7 @@ object CallEvents {
         val lastAt = Prefs.get(ctx, LAST_CALL_AT).toLongOrNull() ?: 0L
         val lastNumber = Prefs.get(ctx, LAST_CALL_NUMBER)
         if (normalized == lastNumber && now - lastAt < DEDUPE_WINDOW_MS) {
-            LogStore.add(ctx, "来电忽略重复事件: $source $normalized")
+            LogStore.add(ctx, "来电忽略重复事件: $source $normalized", diagnostic = true)
             return
         }
 

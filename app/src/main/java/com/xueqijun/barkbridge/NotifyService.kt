@@ -27,6 +27,10 @@ class NotifyService: NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification) {
 
         if(sbn.packageName!="com.tencent.mm") return
+        if (!AppSettings.appEnabled(applicationContext)) {
+            LogStore.add(applicationContext, "已关闭接收，忽略微信通知", diagnostic = true)
+            return
+        }
 
         val e = sbn.notification.extras
         val title = e.getCharSequence(Notification.EXTRA_TITLE)?.toString()?:""

@@ -9,6 +9,8 @@ object PendingPushes {
     private const val MAX_ITEMS = 30
 
     fun add(ctx: Context, title: String, body: String) {
+        if (!AppSettings.appEnabled(ctx)) return
+
         val list = read(ctx)
         list.put(JSONObject().apply {
             put("title", title)
@@ -25,6 +27,8 @@ object PendingPushes {
     }
 
     fun flush(ctx: Context, reason: String) {
+        if (!AppSettings.appEnabled(ctx)) return
+
         val key = Prefs.get(ctx, "key")
         val list = read(ctx)
         if (list.length() == 0 || key.isBlank()) return

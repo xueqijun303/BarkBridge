@@ -8,6 +8,11 @@ object CallEvents {
     private const val DEDUPE_WINDOW_MS = 8000L
 
     fun notifyIncoming(ctx: Context, number: String, source: String) {
+        if (!AppSettings.appEnabled(ctx)) {
+            LogStore.add(ctx, "已关闭接收，忽略来电事件: $source", diagnostic = true)
+            return
+        }
+
         val normalized = number.ifBlank { "未知号码" }
         val display = ContactNames.displayFor(ctx, normalized)
         val now = System.currentTimeMillis()

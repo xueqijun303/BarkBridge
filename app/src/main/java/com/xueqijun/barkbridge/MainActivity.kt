@@ -107,10 +107,15 @@ class MainActivity : Activity() {
     private fun buildBarkCard(): LinearLayout {
         val card = card()
         card.addView(sectionTitle("Bark 配置"))
+        card.addView(check("接收微信和来电推送", AppSettings.appEnabled(this)) {
+            AppSettings.setAppEnabled(this, it)
+            LogStore.add(this, if (it) "已开启接收微信和来电推送" else "已关闭接收微信和来电推送")
+            refreshStatus()
+        }.withTop(10))
         card.addView(input("Bark Key 或完整 URL", AppSettings.barkKey(this)) {
             AppSettings.setBarkKey(this, it)
             refreshStatus()
-        }.withTop(10))
+        }.withTop(8))
         card.addView(input("Bark 服务器", AppSettings.barkServer(this)) {
             AppSettings.setBarkServer(this, it)
         }.withTop(8))
@@ -262,7 +267,7 @@ class MainActivity : Activity() {
         setStatusLine(postNotificationStatus, hasPostNotificationPermission(), "前台服务通知权限")
         setStatusLine(batteryStatus, isIgnoringBatteryOptimizations(), "忽略电池优化")
         setStatusLine(backgroundDataStatus, isBackgroundDataAllowed(), "后台联网不受限")
-        setStatusLine(serviceStatus, AppSettings.barkKey(this).isNotBlank(), "Bark Key 已配置")
+        setStatusLine(serviceStatus, AppSettings.barkKey(this).isNotBlank() && AppSettings.appEnabled(this), "接收开关 / Bark Key")
         setNeutralStatusLine(pendingStatus, "待补发 ${PendingPushes.count(this)} 条")
         logView.text = LogStore.get(this).ifBlank { "暂无记录" }
     }
@@ -406,9 +411,9 @@ class MainActivity : Activity() {
     private fun appVersionName(): String {
         return try {
             val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
-            info.versionName ?: "1.2.5"
+            info.versionName ?: "1.2.6"
         } catch (e: Exception) {
-            "1.2.5"
+            "1.2.6"
         }
     }
 

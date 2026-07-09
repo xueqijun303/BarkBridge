@@ -7,6 +7,9 @@ object AppSettings {
     private const val DEFAULT_BLOCK = "广告,拼多多,淘宝"
     private const val DEFAULT_IMPORTANT = "验证码,银行,转账,老板"
 
+    fun appEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "app_enabled", true)
+    fun setAppEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "app_enabled", value)
+
     fun barkKey(ctx: Context): String = Prefs.get(ctx, "key").trim()
     fun setBarkKey(ctx: Context, value: String) = Prefs.set(ctx, "key", value.trim())
 

@@ -11,7 +11,7 @@ object Bark {
     fun send(ctx: Context, key: String, title: String, body: String, queueOnFailure: Boolean = true) {
         val config = key.trim()
         if (config.isBlank()) {
-            LogStore.add(ctx, "Bark 推送失败: Bark Key 为空")
+            LogStore.add(ctx, "Bark 推送失败: Bark Key 为空", category = "Bark")
             return
         }
 
@@ -29,13 +29,13 @@ object Bark {
                 val code = conn.responseCode
                 val response = readResponse(conn)
                 if(code in 200..299){
-                    LogStore.add(ctx, "Bark 推送成功: HTTP $code")
+                    LogStore.add(ctx, "Bark 推送成功: HTTP $code", category = "Bark")
                 }else{
-                    LogStore.add(ctx, "Bark 推送失败: HTTP $code ${response.take(160)}")
+                    LogStore.add(ctx, "Bark 推送失败: HTTP $code ${response.take(160)}", category = "Bark")
                     if (queueOnFailure) PendingPushes.add(ctx, title, body)
                 }
             }catch(e:Exception){
-                LogStore.add(ctx, "Bark 推送失败: ${e.javaClass.simpleName} ${e.message.orEmpty()}".take(220))
+                LogStore.add(ctx, "Bark 推送失败: ${e.javaClass.simpleName} ${e.message.orEmpty()}".take(220), category = "Bark")
                 if (queueOnFailure) PendingPushes.add(ctx, title, body)
             }finally{
                 conn?.disconnect()

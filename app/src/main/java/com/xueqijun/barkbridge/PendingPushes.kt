@@ -23,7 +23,7 @@ object PendingPushes {
             trimmed.put(list.getJSONObject(i))
         }
         Prefs.set(ctx, KEY, trimmed.toString())
-        LogStore.add(ctx, "已加入待补发队列: $title")
+        LogStore.add(ctx, "已加入待补发队列: $title", category = "Bark")
     }
 
     fun flush(ctx: Context, reason: String) {
@@ -34,11 +34,16 @@ object PendingPushes {
         if (list.length() == 0 || key.isBlank()) return
 
         Prefs.set(ctx, KEY, "")
-        LogStore.add(ctx, "开始补发 ${list.length()} 条 Bark: $reason")
+        LogStore.add(ctx, "开始补发 ${list.length()} 条 Bark: $reason", category = "Bark")
         for (i in 0 until list.length()) {
             val item = list.getJSONObject(i)
             Bark.send(ctx, key, item.optString("title"), item.optString("body"), queueOnFailure = true)
         }
+    }
+
+    fun clear(ctx: Context) {
+        Prefs.set(ctx, KEY, "")
+        LogStore.add(ctx, "已清空待补发队列", category = "Bark")
     }
 
     fun count(ctx: Context): Int {

@@ -27,8 +27,8 @@ class NotifyService: NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification) {
 
         if(sbn.packageName!="com.tencent.mm") return
-        if (!AppSettings.appEnabled(applicationContext)) {
-            LogStore.add(applicationContext, "已关闭接收，忽略微信通知", diagnostic = true)
+        if (!AppSettings.appEnabled(applicationContext) || !AppSettings.wechatEnabled(applicationContext)) {
+            LogStore.add(applicationContext, "已关闭微信接收，忽略微信通知", diagnostic = true, category = "微信")
             return
         }
 
@@ -37,9 +37,13 @@ class NotifyService: NotificationListenerService() {
         val text = e.getCharSequence(Notification.EXTRA_TEXT)?.toString()?:""
 
         val full = "$title $text"
+        if (!QuietHours.allowsWechat(applicationContext, full)) {
+            LogStore.add(applicationContext, "勿扰时段忽略微信通知", diagnostic = true, category = "微信")
+            return
+        }
 
         if(RuleEngine.shouldDrop(applicationContext, title, text)) {
-            LogStore.add(applicationContext, "微信通知已按规则过滤", diagnostic = true)
+            LogStore.add(applicationContext, "微信通知已按规则过滤", diagnostic = true, category = "微信")
             return
         }
 
@@ -50,13 +54,14 @@ class NotifyService: NotificationListenerService() {
         else
             AI.summary(full)
 
-        Bark.send(applicationContext,key,"微信消息",msg)
+        val pushTitle = if (title.isBlank()) "微信消息" else "微信 - $title"
+        Bark.send(applicationContext,key,pushTitle,msg)
 
         val logText = if (AppSettings.saveMessageBody(applicationContext)) {
             full
         } else {
             "微信消息已推送"
         }
-        LogStore.add(applicationContext, logText)
+        LogStore.add(applicationContext, logText, category = "微信")
     }
 }

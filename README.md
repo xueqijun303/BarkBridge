@@ -1,4 +1,4 @@
-# BarkBridge v1.2.6
+# BarkBridge v1.2.7
 
 BarkBridge 是一款 Android 工具，可以把选定的微信通知和来电事件转发到 Bark。
 
@@ -12,13 +12,17 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 来电联系人名称匹配 / Contact-name lookup for incoming calls
 - Bark Key 图形化配置 / Graphical Bark Key configuration
 - 接收微信和来电推送总开关 / Master switch for WeChat and incoming-call forwarding
+- 微信/来电独立开关 / Separate WeChat and incoming-call switches
+- 勿扰时段和重要消息例外 / Quiet hours with important-message exceptions
 - 自定义 Bark 服务器、分组、铃声、图标和通知级别 / Custom Bark server, group, sound, icon, and interruption level
+- 配置导入导出 / Configuration import and export
 - 配置自动保存 / Automatic configuration persistence
 - 开机自启动接收器 / Boot startup receiver
 - 后台常驻前台服务 / Foreground service
 - 通知监听重绑辅助 / Notification listener rebind helper
 - 息屏运行唤醒锁 / Wake lock for screen-off operation
 - Bark 失败补发队列 / Delayed resend queue for failed Bark requests
+- 失败补发手动管理 / Manual failed-resend management
 - 微信关键词/联系人过滤 / WeChat keyword/contact filtering
 - 可选屏蔽群聊消息 / Optional group-chat blocking
 - 带时间戳的日志和隐私控制 / Timestamped logs with privacy controls
@@ -31,6 +35,16 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 支持本地属性或 GitHub Secrets 发布签名 / Optional release signing through local properties or GitHub Secrets
 
 ## 最新变化 / What's New
+
+### v1.2.7
+
+- 一次性新增 8 项增强：微信/来电独立开关、勿扰时段、推送内容格式优化、配置导入导出、首页运行状态、日志分类过滤、失败补发管理、华为设置引导区。
+- 关闭某类接收后，该类消息不会推送，也不会进入补发队列。
+- 配置导出会复制 JSON 到剪贴板；导入时把 JSON 粘贴回输入框即可。
+
+- Added eight improvements in one release: separate WeChat/call switches, quiet hours, clearer push formatting, config import/export, top-level running status, categorized log filtering, resend management, and a Huawei settings guide.
+- Disabled channels no longer send pushes or create pending resend items.
+- Config export copies JSON to the clipboard; import by pasting the JSON back into the input box.
 
 ### v1.2.6
 
@@ -95,8 +109,8 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 The current APK artifacts are included at:
 
 ```text
-release/BarkBridge_v1.2.6-debug.apk
-release/BarkBridge_v1.2.6-release-unsigned.apk
+release/BarkBridge_v1.2.7-debug.apk
+release/BarkBridge_v1.2.7-release-unsigned.apk
 ```
 
 Debug APK 可直接用于测试安装。未签名 release APK 需要签名后再公开分发。
@@ -132,9 +146,9 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## 息屏推送 / Screen-Off Delivery
 
-BarkBridge v1.2.6 的目标是在手机息屏或锁屏时继续转发微信通知和来电事件。
+BarkBridge v1.2.7 的目标是在手机息屏或锁屏时继续转发微信通知和来电事件。
 
-BarkBridge v1.2.6 is designed to keep forwarding WeChat notifications and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.2.7 is designed to keep forwarding WeChat notifications and incoming-call events while the phone screen is off or locked.
 
 App 使用前台服务、通知监听重绑、唤醒锁、后台联网状态检测和失败补发队列，让 Bark 推送在息屏期间尽量保持可用。
 
@@ -210,6 +224,6 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-推送类似 `v1.2.6` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
+推送类似 `v1.2.7` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
 
-Pushing a tag such as `v1.2.6` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.2.7` builds APKs and publishes them to the GitHub Release page automatically.

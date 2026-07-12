@@ -10,6 +10,30 @@ object AppSettings {
     fun appEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "app_enabled", true)
     fun setAppEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "app_enabled", value)
 
+    fun wechatEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "wechat_enabled", true)
+    fun setWechatEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "wechat_enabled", value)
+
+    fun callEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "call_enabled", true)
+    fun setCallEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "call_enabled", value)
+
+    fun quietHoursEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "quiet_hours_enabled")
+    fun setQuietHoursEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "quiet_hours_enabled", value)
+
+    fun quietStart(ctx: Context): String = Prefs.get(ctx, "quiet_start").ifBlank { "23:00" }
+    fun setQuietStart(ctx: Context, value: String) = Prefs.set(ctx, "quiet_start", value.trim().ifBlank { "23:00" })
+
+    fun quietEnd(ctx: Context): String = Prefs.get(ctx, "quiet_end").ifBlank { "08:00" }
+    fun setQuietEnd(ctx: Context, value: String) = Prefs.set(ctx, "quiet_end", value.trim().ifBlank { "08:00" })
+
+    fun allowImportantInQuiet(ctx: Context): Boolean = Prefs.getBool(ctx, "quiet_allow_important", true)
+    fun setAllowImportantInQuiet(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "quiet_allow_important", value)
+
+    fun allowCallsInQuiet(ctx: Context): Boolean = Prefs.getBool(ctx, "quiet_allow_calls", true)
+    fun setAllowCallsInQuiet(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "quiet_allow_calls", value)
+
+    fun logFilter(ctx: Context): String = Prefs.get(ctx, "log_filter").ifBlank { "全部" }
+    fun setLogFilter(ctx: Context, value: String) = Prefs.set(ctx, "log_filter", value.ifBlank { "全部" })
+
     fun barkKey(ctx: Context): String = Prefs.get(ctx, "key").trim()
     fun setBarkKey(ctx: Context, value: String) = Prefs.set(ctx, "key", value.trim())
 

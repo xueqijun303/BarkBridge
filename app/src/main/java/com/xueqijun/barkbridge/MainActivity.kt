@@ -2,11 +2,14 @@ package com.xueqijun.barkbridge
 
 import android.Manifest
 import android.app.Activity
-import android.content.res.ColorStateList
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -29,10 +32,12 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 
 class MainActivity : Activity() {
 
     private val uiHandler = Handler(Looper.getMainLooper())
+    private lateinit var overallStatus: TextView
     private lateinit var notificationStatus: TextView
     private lateinit var phoneStatus: TextView
     private lateinit var phoneNumberStatus: TextView
@@ -80,10 +85,15 @@ class MainActivity : Activity() {
 
         root.addView(buildHeader())
 
+        root.addView(buildOverviewCard().withTop(14))
         root.addView(buildBarkCard().withTop(16))
+        root.addView(buildQuietHoursCard().withTop(14))
         root.addView(buildPermissionCard().withTop(14))
+        root.addView(buildHuaweiGuideCard().withTop(14))
         root.addView(buildPrivacyCard().withTop(14))
         root.addView(buildRulesCard().withTop(14))
+        root.addView(buildBackupCard().withTop(14))
+        root.addView(buildResendCard().withTop(14))
         root.addView(buildFeatureCard().withTop(14))
         root.addView(buildLogCard().withTop(14))
 
@@ -101,17 +111,38 @@ class MainActivity : Activity() {
         header.addView(text("v${appVersionName()} 正式版", 14f, Color.rgb(216, 246, 241), false).withTop(4))
         header.addView(text("微信通知与来电推送到 Bark", 15f, Color.rgb(239, 255, 252), false).withTop(14))
         header.addView(text("息屏推送 / 后台常驻 / 华为应用启动管理", 13f, Color.rgb(190, 229, 224), false).withTop(5))
+        overallStatus = text("", 14f, Color.WHITE, true)
+        overallStatus.setPadding(dp(12), dp(8), dp(12), dp(8))
+        overallStatus.background = roundedRect(Color.rgb(12, 93, 88), 1, Color.rgb(62, 150, 143), 8)
+        header.addView(overallStatus.withTop(14))
         return header
+    }
+
+    private fun buildOverviewCard(): LinearLayout {
+        val card = card()
+        card.addView(sectionTitle("运行概览"))
+        card.addView(text("打开 App 后先看这里：开关、权限、Bark Key、补发队列都会影响最终推送。", 13f, Muted, false).withTop(8))
+        return card
     }
 
     private fun buildBarkCard(): LinearLayout {
         val card = card()
         card.addView(sectionTitle("Bark 配置"))
-        card.addView(check("接收微信和来电推送", AppSettings.appEnabled(this)) {
+        card.addView(check("总开关：接收推送", AppSettings.appEnabled(this)) {
             AppSettings.setAppEnabled(this, it)
             LogStore.add(this, if (it) "已开启接收微信和来电推送" else "已关闭接收微信和来电推送")
             refreshStatus()
         }.withTop(10))
+        card.addView(check("接收微信消息", AppSettings.wechatEnabled(this)) {
+            AppSettings.setWechatEnabled(this, it)
+            LogStore.add(this, if (it) "已开启微信推送" else "已关闭微信推送", category = "微信")
+            refreshStatus()
+        }.withTop(6))
+        card.addView(check("接收来电提醒", AppSettings.callEnabled(this)) {
+            AppSettings.setCallEnabled(this, it)
+            LogStore.add(this, if (it) "已开启来电推送" else "已关闭来电推送", category = "来电")
+            refreshStatus()
+        }.withTop(6))
         card.addView(input("Bark Key 或完整 URL", AppSettings.barkKey(this)) {
             AppSettings.setBarkKey(this, it)
             refreshStatus()
@@ -139,6 +170,30 @@ class MainActivity : Activity() {
             refreshSoon()
         }
         card.addView(testButton.withTop(12))
+        return card
+    }
+
+    private fun buildQuietHoursCard(): LinearLayout {
+        val card = card()
+        card.addView(sectionTitle("勿扰模式"))
+        card.addView(check("启用勿扰时段", AppSettings.quietHoursEnabled(this)) {
+            AppSettings.setQuietHoursEnabled(this, it)
+            refreshStatus()
+        }.withTop(10))
+        card.addView(input("开始时间，例如 23:00", AppSettings.quietStart(this)) {
+            AppSettings.setQuietStart(this, it)
+            refreshStatus()
+        }.withTop(8))
+        card.addView(input("结束时间，例如 08:00", AppSettings.quietEnd(this)) {
+            AppSettings.setQuietEnd(this, it)
+            refreshStatus()
+        }.withTop(8))
+        card.addView(check("勿扰时段仍推送重要微信关键词", AppSettings.allowImportantInQuiet(this)) {
+            AppSettings.setAllowImportantInQuiet(this, it)
+        }.withTop(8))
+        card.addView(check("勿扰时段仍推送来电", AppSettings.allowCallsInQuiet(this)) {
+            AppSettings.setAllowCallsInQuiet(this, it)
+        }.withTop(8))
         return card
     }
 
@@ -192,6 +247,28 @@ class MainActivity : Activity() {
         return card
     }
 
+    private fun buildHuaweiGuideCard(): LinearLayout {
+        val card = card()
+        card.addView(sectionTitle("华为设置引导"))
+        card.addView(text("建议依次检查：通知监听、忽略电池优化、应用启动管理、后台联网、应用通知。", 13f, Muted, false).withTop(8))
+        card.addView(button("通知监听权限").apply {
+            setOnClickListener { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+        }.withTop(10))
+        card.addView(button("忽略电池优化").apply {
+            setOnClickListener { requestIgnoreBatteryOptimizations() }
+        }.withTop(8))
+        card.addView(button("应用启动管理").apply {
+            setOnClickListener { openHuaweiStartupManager() }
+        }.withTop(8))
+        card.addView(button("后台联网").apply {
+            setOnClickListener { openBackgroundDataSettings() }
+        }.withTop(8))
+        card.addView(button("应用详情/通知设置").apply {
+            setOnClickListener { openAppSettings() }
+        }.withTop(8))
+        return card
+    }
+
     private fun buildPrivacyCard(): LinearLayout {
         val card = card()
         card.addView(sectionTitle("日志与隐私"))
@@ -205,6 +282,53 @@ class MainActivity : Activity() {
         }.withTop(8))
         card.addView(check("日志保存微信消息正文", AppSettings.saveMessageBody(this)) {
             AppSettings.setSaveMessageBody(this, it)
+        }.withTop(8))
+        return card
+    }
+
+    private fun buildBackupCard(): LinearLayout {
+        val card = card()
+        card.addView(sectionTitle("配置导入 / 导出"))
+        card.addView(text("导出会复制 JSON 到剪贴板。导入时把 JSON 粘贴到下方输入框，再点导入。", 13f, Muted, false).withTop(8))
+        val importBox = multilineInput("粘贴配置 JSON", "") { }
+        card.addView(importBox.withTop(10))
+        card.addView(button("导出配置到剪贴板").apply {
+            setOnClickListener {
+                copyToClipboard("BarkBridge 配置", ConfigBackup.export(this@MainActivity))
+                toast("配置已复制")
+                LogStore.add(this@MainActivity, "配置已导出到剪贴板")
+            }
+        }.withTop(10))
+        card.addView(button("从输入框导入配置").apply {
+            setOnClickListener {
+                if (ConfigBackup.import(this@MainActivity, importBox.text?.toString().orEmpty())) {
+                    toast("配置已导入")
+                    LogStore.add(this@MainActivity, "配置已导入")
+                    refreshSoon()
+                } else {
+                    toast("配置 JSON 无效")
+                    LogStore.add(this@MainActivity, "配置导入失败: JSON 无效")
+                }
+            }
+        }.withTop(8))
+        return card
+    }
+
+    private fun buildResendCard(): LinearLayout {
+        val card = card()
+        card.addView(sectionTitle("失败补发管理"))
+        card.addView(text("网络失败时会进入待补发队列；关闭总开关时不会补发。", 13f, Muted, false).withTop(8))
+        card.addView(button("立即补发待发送消息").apply {
+            setOnClickListener {
+                PendingPushes.flush(this@MainActivity, "manual")
+                refreshSoon()
+            }
+        }.withTop(10))
+        card.addView(button("清空待补发队列").apply {
+            setOnClickListener {
+                PendingPushes.clear(this@MainActivity)
+                refreshStatus()
+            }
         }.withTop(8))
         return card
     }
@@ -245,6 +369,22 @@ class MainActivity : Activity() {
     private fun buildLogCard(): LinearLayout {
         val card = card()
         card.addView(sectionTitle("最近记录"))
+        card.addView(text("当前过滤：${AppSettings.logFilter(this)}", 13f, Muted, false).withTop(8))
+        card.addView(button("日志：全部").apply {
+            setOnClickListener { setLogFilter("全部") }
+        }.withTop(8))
+        card.addView(button("日志：微信").apply {
+            setOnClickListener { setLogFilter("微信") }
+        }.withTop(8))
+        card.addView(button("日志：来电").apply {
+            setOnClickListener { setLogFilter("来电") }
+        }.withTop(8))
+        card.addView(button("日志：Bark").apply {
+            setOnClickListener { setLogFilter("Bark") }
+        }.withTop(8))
+        card.addView(button("日志：系统").apply {
+            setOnClickListener { setLogFilter("系统") }
+        }.withTop(8))
         logView = text("", 13f, Muted, false)
         logView.setPadding(dp(12), dp(10), dp(12), dp(10))
         logView.background = roundedRect(InputFill, 1, Border, 8)
@@ -260,6 +400,7 @@ class MainActivity : Activity() {
     }
 
     private fun refreshStatus() {
+        overallStatus.text = overallStatusText()
         setStatusLine(notificationStatus, isNotificationListenerEnabled(), "微信通知监听")
         setStatusLine(phoneStatus, hasPhoneStatePermission(), "电话状态权限")
         setStatusLine(phoneNumberStatus, hasCallNumberPermission(), "来电号码权限")
@@ -269,7 +410,7 @@ class MainActivity : Activity() {
         setStatusLine(backgroundDataStatus, isBackgroundDataAllowed(), "后台联网不受限")
         setStatusLine(serviceStatus, AppSettings.barkKey(this).isNotBlank() && AppSettings.appEnabled(this), "接收开关 / Bark Key")
         setNeutralStatusLine(pendingStatus, "待补发 ${PendingPushes.count(this)} 条")
-        logView.text = LogStore.get(this).ifBlank { "暂无记录" }
+        logView.text = LogStore.getFiltered(this).ifBlank { "暂无记录" }
     }
 
     private fun refreshSoon() {
@@ -408,12 +549,37 @@ class MainActivity : Activity() {
         startActivity(intent)
     }
 
+    private fun overallStatusText(): String {
+        if (!AppSettings.appEnabled(this)) return "已暂停接收"
+        if (!AppSettings.wechatEnabled(this) && !AppSettings.callEnabled(this)) return "微信和来电均已关闭"
+        if (AppSettings.barkKey(this).isBlank()) return "Bark Key 未配置"
+        if (!isNotificationListenerEnabled()) return "缺少微信通知监听权限"
+        if (!hasPhoneStatePermission()) return "缺少电话状态权限"
+        if (QuietHours.isNowQuiet(this)) return "勿扰时段运行中"
+        if (PendingPushes.count(this) > 0) return "运行中，有 ${PendingPushes.count(this)} 条待补发"
+        return "运行中"
+    }
+
+    private fun setLogFilter(filter: String) {
+        AppSettings.setLogFilter(this, filter)
+        refreshStatus()
+    }
+
+    private fun copyToClipboard(label: String, value: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, value))
+    }
+
+    private fun toast(value: String) {
+        Toast.makeText(this, value, Toast.LENGTH_SHORT).show()
+    }
+
     private fun appVersionName(): String {
         return try {
             val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
-            info.versionName ?: "1.2.6"
+            info.versionName ?: "1.2.7"
         } catch (e: Exception) {
-            "1.2.6"
+            "1.2.7"
         }
     }
 
@@ -435,6 +601,14 @@ class MainActivity : Activity() {
                 }
                 override fun afterTextChanged(s: Editable?) {}
             })
+        }
+    }
+
+    private fun multilineInput(hint: String, value: String, onChange: (String) -> Unit): EditText {
+        return input(hint, value, onChange).apply {
+            setSingleLine(false)
+            minLines = 4
+            gravity = Gravity.TOP
         }
     }
 

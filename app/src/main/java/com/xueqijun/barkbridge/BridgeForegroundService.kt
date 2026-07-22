@@ -23,6 +23,7 @@ class BridgeForegroundService : Service() {
         override fun onReceive(context: Context, intent: Intent) {
             val action = intent.action ?: return
             LogStore.add(context, "屏幕状态: $action", diagnostic = true)
+            BatteryEvents.handle(context, intent)
             PendingPushes.flush(context, action)
             if (action == Intent.ACTION_USER_PRESENT) {
                 requestNotificationListenerRebind(context)
@@ -45,12 +46,14 @@ class BridgeForegroundService : Service() {
         registerScreenReceiver()
         requestNotificationListenerRebind(applicationContext)
         PendingPushes.flush(applicationContext, "service_start")
+        RemoteReplyPoller.start(applicationContext)
         handler.postDelayed(rebindRunnable, REBIND_INTERVAL_MS)
         LogStore.add(applicationContext, "后台常驻服务已启动")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         callService?.start()
+        RemoteReplyPoller.start(applicationContext)
         return START_STICKY
     }
 
@@ -62,6 +65,7 @@ class BridgeForegroundService : Service() {
             LogStore.add(applicationContext, "屏幕监听注销失败: ${e.javaClass.simpleName}")
         }
         WakeLocks.releaseServiceLock(applicationContext)
+        RemoteReplyPoller.stop()
         callService?.stop()
         callService = null
         LogStore.add(applicationContext, "后台常驻服务已停止")
@@ -108,6 +112,10 @@ class BridgeForegroundService : Service() {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_USER_PRESENT)
+            addAction(Intent.ACTION_POWER_CONNECTED)
+            addAction(Intent.ACTION_POWER_DISCONNECTED)
+            addAction(Intent.ACTION_BATTERY_LOW)
+            addAction(Intent.ACTION_BATTERY_CHANGED)
         }
         registerReceiver(screenReceiver, filter)
     }

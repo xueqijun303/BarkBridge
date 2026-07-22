@@ -1,4 +1,4 @@
-# BarkBridge v1.2.7
+# BarkBridge v1.3.0
 
 BarkBridge 是一款 Android 工具，可以把选定的微信通知和来电事件转发到 Bark。
 
@@ -13,6 +13,9 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - Bark Key 图形化配置 / Graphical Bark Key configuration
 - 接收微信和来电推送总开关 / Master switch for WeChat and incoming-call forwarding
 - 微信/来电独立开关 / Separate WeChat and incoming-call switches
+- 短信通知、通用 App 通知、未接来电、电量状态转发 / SMS notification, generic app notification, missed-call, and battery-state forwarding
+- 微信白名单远程回复入口 / Remote reply entry for whitelisted WeChat contacts
+- Bark 回复链接和安卓轮询中转服务 / Bark reply links with Android-side relay polling
 - 勿扰时段和重要消息例外 / Quiet hours with important-message exceptions
 - 自定义 Bark 服务器、分组、铃声、图标和通知级别 / Custom Bark server, group, sound, icon, and interruption level
 - 配置导入导出 / Configuration import and export
@@ -35,6 +38,32 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 支持本地属性或 GitHub Secrets 发布签名 / Optional release signing through local properties or GitHub Secrets
 
 ## 最新变化 / What's New
+
+### v1.3.0
+
+- 新增微信远程回复第一档实现：优先使用 Android 通知快捷回复，不打开微信界面。
+- Bark 微信推送可附带回复链接，iPhone 点开后可进入自建中转页面输入回复。
+- Android 前台服务可轮询中转接口，收到 `{ "token": "...", "text": "..." }` 后调用微信通知快捷回复。
+- 远程回复只对配置的联系人白名单生效；若远程回复联系人留空，则复用微信过滤白名单。
+- 远程回复默认关闭，不影响现有微信、来电、短信、通用 App 和电量推送。
+
+- Added first-stage WeChat remote reply using Android notification quick reply instead of opening WeChat.
+- WeChat Bark pushes can include a reply link that opens a self-hosted relay page on iPhone.
+- The Android foreground service can poll a relay endpoint and send `{ "token": "...", "text": "..." }` replies through WeChat quick reply.
+- Remote reply only applies to configured contact allowlists; if its allowlist is empty, the WeChat forwarding allowlist is reused.
+- Remote reply is disabled by default and does not affect existing forwarding features.
+
+### v1.2.8
+
+- 新增短信通知转发，优先通过默认短信 App/常见短信 App 的通知监听实现，不读取短信数据库。
+- 新增通用 App 通知转发，可配置包名白名单。
+- 新增未接来电提醒。
+- 新增电量/充电状态提醒，包括充电连接、断开和低电量阈值。
+
+- Added SMS notification forwarding through default/common SMS app notifications without reading the SMS database.
+- Added generic app notification forwarding with a package-name whitelist.
+- Added missed-call alerts.
+- Added battery and charging-state alerts, including charging connected, disconnected, and low-battery threshold handling.
 
 ### v1.2.7
 
@@ -109,8 +138,8 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 The current APK artifacts are included at:
 
 ```text
-release/BarkBridge_v1.2.7-debug.apk
-release/BarkBridge_v1.2.7-release-unsigned.apk
+release/BarkBridge_v1.3.0-debug.apk
+release/BarkBridge_v1.3.0-release-unsigned.apk
 ```
 
 Debug APK 可直接用于测试安装。未签名 release APK 需要签名后再公开分发。
@@ -146,9 +175,9 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## 息屏推送 / Screen-Off Delivery
 
-BarkBridge v1.2.7 的目标是在手机息屏或锁屏时继续转发微信通知和来电事件。
+BarkBridge v1.3.0 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
 
-BarkBridge v1.2.7 is designed to keep forwarding WeChat notifications and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.3.0 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
 
 App 使用前台服务、通知监听重绑、唤醒锁、后台联网状态检测和失败补发队列，让 Bark 推送在息屏期间尽量保持可用。
 
@@ -169,6 +198,67 @@ Recommended settings:
 如果临时网络失败，BarkBridge 会把失败的 Bark 推送加入队列，并在 App 恢复、设备解锁或前台服务重启时补发。
 
 If a temporary network failure occurs, BarkBridge queues failed Bark pushes and resends them when the app is resumed, the device is unlocked, or the foreground service restarts.
+
+## 远程回复 / Remote Reply
+
+远程回复的执行端仍然是 Android 手机上的微信 A。iPhone 上的微信 B 不能替微信 A 回复，只作为查看和输入回复内容的入口。
+
+Remote replies are still executed by WeChat A on the Android phone. WeChat B on iPhone cannot reply on behalf of WeChat A; it only acts as the viewing and input entry.
+
+实现链路：
+
+Flow:
+
+- Android 监听微信 A 通知，并匹配联系人白名单。
+- 如果微信通知包含快捷回复动作，BarkBridge 生成短期有效 token。
+- Bark 推送到 iPhone，并通过 Bark 的 `url` 参数附带回复页面链接。
+- iPhone 打开回复页面并提交回复内容到你的中转服务。
+- Android 前台服务轮询中转接口，拿到 token 和 text 后调用微信通知快捷回复。
+
+- Android listens to WeChat A notifications and matches the contact allowlist.
+- If the WeChat notification contains a quick-reply action, BarkBridge creates a short-lived token.
+- Bark pushes to iPhone and includes the reply page through Bark's `url` parameter.
+- iPhone opens the reply page and submits the reply text to your relay service.
+- The Android foreground service polls the relay endpoint, receives token and text, then sends the reply through WeChat quick reply.
+
+中转接口返回格式可以是单条对象、数组，或包含 `replies` 数组的对象：
+
+The relay polling endpoint may return one object, an array, or an object with a `replies` array:
+
+```json
+{"id":"reply-001","token":"token-from-bark-link","text":"收到，我稍后处理"}
+```
+
+```json
+[{"id":"reply-001","token":"token-from-bark-link","text":"收到，我稍后处理"}]
+```
+
+```json
+{"replies":[{"id":"reply-001","token":"token-from-bark-link","text":"收到，我稍后处理"}]}
+```
+
+仓库内提供了一个 Cloudflare Worker 示例：`relay/cloudflare-worker.js`。部署时绑定一个 KV 命名空间到 `REPLIES`，可选设置环境变量 `REPLY_SECRET`。App 中这样配置：
+
+A Cloudflare Worker sample is included at `relay/cloudflare-worker.js`. Bind a KV namespace as `REPLIES`, and optionally set `REPLY_SECRET`. Configure the app like this:
+
+```text
+iPhone 回复页面 URL: https://your-worker.example.workers.dev/reply
+安卓轮询取回复 URL: https://your-worker.example.workers.dev/poll?secret=your-secret
+```
+
+限制：
+
+Limitations:
+
+- 依赖微信通知是否提供快捷回复动作。
+- 原通知仍在、token 未过期时才能回复；当前 token 有效期约 30 分钟。
+- 如果微信版本、系统通知策略或锁屏策略不提供快捷回复，则不会生成回复链接。
+- 暂不包含无障碍自动打开微信输入方案。
+
+- Depends on whether WeChat exposes a quick-reply action in its notification.
+- The original notification must still be valid and the token must not expire; current token lifetime is about 30 minutes.
+- If WeChat, Android notification policy, or lock-screen policy does not expose quick reply, no reply link is generated.
+- Accessibility-based automatic WeChat UI input is not included yet.
 
 ## 构建 / Build
 
@@ -224,6 +314,6 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-推送类似 `v1.2.7` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
+推送类似 `v1.3.0` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
 
-Pushing a tag such as `v1.2.7` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.3.0` builds APKs and publishes them to the GitHub Release page automatically.

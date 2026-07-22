@@ -88,6 +88,8 @@ class MainActivity : Activity() {
         root.addView(buildOverviewCard().withTop(14))
         root.addView(buildBarkCard().withTop(16))
         root.addView(buildQuietHoursCard().withTop(14))
+        root.addView(buildNotificationSourcesCard().withTop(14))
+        root.addView(buildRemoteReplyCard().withTop(14))
         root.addView(buildPermissionCard().withTop(14))
         root.addView(buildHuaweiGuideCard().withTop(14))
         root.addView(buildPrivacyCard().withTop(14))
@@ -193,6 +195,59 @@ class MainActivity : Activity() {
         }.withTop(8))
         card.addView(check("勿扰时段仍推送来电", AppSettings.allowCallsInQuiet(this)) {
             AppSettings.setAllowCallsInQuiet(this, it)
+        }.withTop(8))
+        return card
+    }
+
+    private fun buildNotificationSourcesCard(): LinearLayout {
+        val card = card()
+        card.addView(sectionTitle("通知来源"))
+        card.addView(text("短信通过短信 App 通知转发，不读取短信数据库；通用 App 只转发白名单包名。", 13f, Muted, false).withTop(8))
+        card.addView(check("接收短信通知", AppSettings.smsNotificationEnabled(this)) {
+            AppSettings.setSmsNotificationEnabled(this, it)
+            refreshStatus()
+        }.withTop(10))
+        card.addView(check("接收通用 App 通知", AppSettings.generalNotificationEnabled(this)) {
+            AppSettings.setGeneralNotificationEnabled(this, it)
+            refreshStatus()
+        }.withTop(8))
+        card.addView(input("通用 App 包名，逗号分隔", AppSettings.generalNotificationPackages(this)) {
+            AppSettings.setGeneralNotificationPackages(this, it)
+        }.withTop(8))
+        card.addView(check("接收未接来电提醒", AppSettings.missedCallEnabled(this)) {
+            AppSettings.setMissedCallEnabled(this, it)
+            refreshStatus()
+        }.withTop(8))
+        card.addView(check("接收电量/充电状态", AppSettings.batteryNotificationEnabled(this)) {
+            AppSettings.setBatteryNotificationEnabled(this, it)
+            refreshStatus()
+        }.withTop(8))
+        card.addView(input("低电量阈值，例如 20", AppSettings.lowBatteryThreshold(this)) {
+            AppSettings.setLowBatteryThreshold(this, it)
+        }.withTop(8))
+        return card
+    }
+
+    private fun buildRemoteReplyCard(): LinearLayout {
+        val card = card()
+        card.addView(sectionTitle("远程回复"))
+        card.addView(text("通过微信通知快捷回复实现。需要中转服务返回 {\"token\":\"...\",\"text\":\"...\"}，且原微信通知仍有效。", 13f, Muted, false).withTop(8))
+        card.addView(check("启用微信远程回复", AppSettings.remoteReplyEnabled(this)) {
+            AppSettings.setRemoteReplyEnabled(this, it)
+            RemoteReplyPoller.start(applicationContext)
+            refreshStatus()
+        }.withTop(10))
+        card.addView(input("可远程回复联系人，留空则使用微信过滤白名单", AppSettings.remoteReplyContacts(this)) {
+            AppSettings.setRemoteReplyContacts(this, it)
+        }.withTop(8))
+        card.addView(input("iPhone 回复页面 URL", AppSettings.remoteReplyPageUrl(this)) {
+            AppSettings.setRemoteReplyPageUrl(this, it)
+        }.withTop(8))
+        card.addView(input("安卓轮询取回复 URL", AppSettings.remoteReplyPollUrl(this)) {
+            AppSettings.setRemoteReplyPollUrl(this, it)
+        }.withTop(8))
+        card.addView(input("轮询间隔秒，5-300", AppSettings.remoteReplyPollSeconds(this)) {
+            AppSettings.setRemoteReplyPollSeconds(this, it)
         }.withTop(8))
         return card
     }
@@ -356,6 +411,8 @@ class MainActivity : Activity() {
         card.addView(sectionTitle("功能状态"))
         card.addView(text("微信通知监听 / 消息详情推送 Bark", 14f, OnCard, false).withTop(12))
         card.addView(text("来电推送 Bark / 联系人名称匹配", 14f, OnCard, false).withTop(8))
+        card.addView(text("短信通知 / 通用 App 通知 / 未接来电 / 电量状态", 14f, OnCard, false).withTop(8))
+        card.addView(text("微信白名单远程回复 / Bark 回复链接 / 中转轮询", 14f, OnCard, false).withTop(8))
         card.addView(text("后台常驻 / 开机自启动 / 失败补发", 14f, OnCard, false).withTop(8))
         card.addView(button("查看 GitHub 最新版本").apply {
             setOnClickListener { openLatestRelease() }
@@ -381,6 +438,18 @@ class MainActivity : Activity() {
         }.withTop(8))
         card.addView(button("日志：Bark").apply {
             setOnClickListener { setLogFilter("Bark") }
+        }.withTop(8))
+        card.addView(button("日志：短信").apply {
+            setOnClickListener { setLogFilter("短信") }
+        }.withTop(8))
+        card.addView(button("日志：App").apply {
+            setOnClickListener { setLogFilter("App") }
+        }.withTop(8))
+        card.addView(button("日志：电量").apply {
+            setOnClickListener { setLogFilter("电量") }
+        }.withTop(8))
+        card.addView(button("日志：回复").apply {
+            setOnClickListener { setLogFilter("回复") }
         }.withTop(8))
         card.addView(button("日志：系统").apply {
             setOnClickListener { setLogFilter("系统") }
@@ -555,6 +624,8 @@ class MainActivity : Activity() {
         if (AppSettings.barkKey(this).isBlank()) return "Bark Key 未配置"
         if (!isNotificationListenerEnabled()) return "缺少微信通知监听权限"
         if (!hasPhoneStatePermission()) return "缺少电话状态权限"
+        if (AppSettings.remoteReplyEnabled(this) && AppSettings.remoteReplyPageUrl(this).isBlank()) return "远程回复缺少回复页面 URL"
+        if (AppSettings.remoteReplyEnabled(this) && AppSettings.remoteReplyPollUrl(this).isBlank()) return "远程回复缺少轮询 URL"
         if (QuietHours.isNowQuiet(this)) return "勿扰时段运行中"
         if (PendingPushes.count(this) > 0) return "运行中，有 ${PendingPushes.count(this)} 条待补发"
         return "运行中"
@@ -577,9 +648,9 @@ class MainActivity : Activity() {
     private fun appVersionName(): String {
         return try {
             val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
-            info.versionName ?: "1.2.7"
+            info.versionName ?: "1.3.0"
         } catch (e: Exception) {
-            "1.2.7"
+            "1.3.0"
         }
     }
 

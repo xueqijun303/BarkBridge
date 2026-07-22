@@ -16,6 +16,40 @@ object AppSettings {
     fun callEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "call_enabled", true)
     fun setCallEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "call_enabled", value)
 
+    fun missedCallEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "missed_call_enabled", true)
+    fun setMissedCallEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "missed_call_enabled", value)
+
+    fun smsNotificationEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "sms_notification_enabled", true)
+    fun setSmsNotificationEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "sms_notification_enabled", value)
+
+    fun generalNotificationEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "general_notification_enabled")
+    fun setGeneralNotificationEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "general_notification_enabled", value)
+
+    fun generalNotificationPackages(ctx: Context): String = Prefs.get(ctx, "general_notification_packages")
+        .ifBlank { "com.tencent.mobileqq,com.alibaba.android.rimet,com.ss.android.lark,com.ss.android.lark.kami,com.eg.android.AlipayGphone,com.google.android.gm" }
+    fun setGeneralNotificationPackages(ctx: Context, value: String) = Prefs.set(ctx, "general_notification_packages", value.trim())
+
+    fun batteryNotificationEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "battery_notification_enabled", true)
+    fun setBatteryNotificationEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "battery_notification_enabled", value)
+
+    fun lowBatteryThreshold(ctx: Context): String = Prefs.get(ctx, "low_battery_threshold").ifBlank { "20" }
+    fun setLowBatteryThreshold(ctx: Context, value: String) = Prefs.set(ctx, "low_battery_threshold", value.trim().ifBlank { "20" })
+
+    fun remoteReplyEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "remote_reply_enabled")
+    fun setRemoteReplyEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "remote_reply_enabled", value)
+
+    fun remoteReplyContacts(ctx: Context): String = Prefs.get(ctx, "remote_reply_contacts").trim()
+    fun setRemoteReplyContacts(ctx: Context, value: String) = Prefs.set(ctx, "remote_reply_contacts", value.trim())
+
+    fun remoteReplyPageUrl(ctx: Context): String = Prefs.get(ctx, "remote_reply_page_url").trim()
+    fun setRemoteReplyPageUrl(ctx: Context, value: String) = Prefs.set(ctx, "remote_reply_page_url", value.trim())
+
+    fun remoteReplyPollUrl(ctx: Context): String = Prefs.get(ctx, "remote_reply_poll_url").trim()
+    fun setRemoteReplyPollUrl(ctx: Context, value: String) = Prefs.set(ctx, "remote_reply_poll_url", value.trim())
+
+    fun remoteReplyPollSeconds(ctx: Context): String = Prefs.get(ctx, "remote_reply_poll_seconds").ifBlank { "20" }
+    fun setRemoteReplyPollSeconds(ctx: Context, value: String) = Prefs.set(ctx, "remote_reply_poll_seconds", value.trim().ifBlank { "20" })
+
     fun quietHoursEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "quiet_hours_enabled")
     fun setQuietHoursEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "quiet_hours_enabled", value)
 

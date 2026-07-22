@@ -6,6 +6,10 @@ import org.json.JSONObject
 object ConfigBackup {
     private val keys = listOf(
         "app_enabled", "wechat_enabled", "call_enabled",
+        "missed_call_enabled", "sms_notification_enabled", "general_notification_enabled",
+        "general_notification_packages", "battery_notification_enabled", "low_battery_threshold",
+        "remote_reply_enabled", "remote_reply_contacts", "remote_reply_page_url",
+        "remote_reply_poll_url", "remote_reply_poll_seconds",
         "quiet_hours_enabled", "quiet_start", "quiet_end", "quiet_allow_important", "quiet_allow_calls",
         "key", "bark_server", "bark_group", "bark_sound", "bark_icon", "bark_level",
         "diagnostic_logs", "mask_phone_logs", "save_message_body",

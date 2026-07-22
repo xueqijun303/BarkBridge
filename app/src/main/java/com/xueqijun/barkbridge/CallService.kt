@@ -10,6 +10,8 @@ import android.telephony.PhoneStateListener
 class CallService(val ctx:Context){
 
     private var listener: PhoneStateListener? = null
+    private var lastRingingNumber: String = ""
+    private var callAnswered: Boolean = false
 
     fun start(){
         if(listener != null) return
@@ -22,9 +24,23 @@ class CallService(val ctx:Context){
 
             val newListener = object:PhoneStateListener(){
                 override fun onCallStateChanged(state:Int,phoneNumber:String?){
-                    if(state==TelephonyManager.CALL_STATE_RINGING){
-                        val number = if(hasCallNumberPermission()) phoneNumber ?: "未知号码" else "未知号码"
-                        CallEvents.notifyIncoming(ctx, number, "监听")
+                    when(state) {
+                        TelephonyManager.CALL_STATE_RINGING -> {
+                            val number = if(hasCallNumberPermission()) phoneNumber ?: "未知号码" else "未知号码"
+                            lastRingingNumber = number
+                            callAnswered = false
+                            CallEvents.notifyIncoming(ctx, number, "监听")
+                        }
+                        TelephonyManager.CALL_STATE_OFFHOOK -> {
+                            callAnswered = true
+                        }
+                        TelephonyManager.CALL_STATE_IDLE -> {
+                            if (lastRingingNumber.isNotBlank() && !callAnswered) {
+                                CallEvents.notifyMissed(ctx, lastRingingNumber, "监听")
+                            }
+                            lastRingingNumber = ""
+                            callAnswered = false
+                        }
                     }
                 }
             }

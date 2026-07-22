@@ -9,6 +9,10 @@ import java.net.URLEncoder
 object Bark {
 
     fun send(ctx: Context, key: String, title: String, body: String, queueOnFailure: Boolean = true) {
+        send(ctx, key, title, body, emptyMap(), queueOnFailure)
+    }
+
+    fun send(ctx: Context, key: String, title: String, body: String, extraParams: Map<String, String>, queueOnFailure: Boolean = true) {
         val config = key.trim()
         if (config.isBlank()) {
             LogStore.add(ctx, "Bark 推送失败: Bark Key 为空", category = "Bark")
@@ -19,7 +23,7 @@ object Bark {
             val wakeLock = WakeLocks.acquireSendLock(ctx)
             var conn: HttpURLConnection? = null
             try{
-                val url = URL(buildUrl(ctx, config, title, body))
+                val url = URL(buildUrl(ctx, config, title, body, extraParams))
                 conn = url.openConnection() as HttpURLConnection
                 conn.requestMethod="GET"
                 conn.connectTimeout=10000
@@ -48,7 +52,7 @@ object Bark {
         if(key.isBlank()) return
         Thread{
             try{
-                val url = URL(buildUrl(null, key.trim(), title, body))
+                val url = URL(buildUrl(null, key.trim(), title, body, emptyMap()))
                 val conn = url.openConnection() as HttpURLConnection
                 conn.requestMethod="GET"
                 conn.connectTimeout=10000
@@ -59,14 +63,14 @@ object Bark {
         }.start()
     }
 
-    private fun buildUrl(ctx: Context?, config: String, title: String, body: String): String {
+    private fun buildUrl(ctx: Context?, config: String, title: String, body: String, extraParams: Map<String, String>): String {
         val base = if(config.startsWith("http://") || config.startsWith("https://")){
             config.trimEnd('/')
         }else{
             val server = ctx?.let { AppSettings.barkServer(it) } ?: "https://api.day.app"
             "${server.trimEnd('/')}/${encode(config)}"
         }
-        val query = ctx?.let { barkQuery(it) }.orEmpty()
+        val query = ctx?.let { barkQuery(it, extraParams) }.orEmpty()
         return "$base/${encode(title)}/${encode(body)}$query"
     }
 
@@ -74,7 +78,7 @@ object Bark {
         return URLEncoder.encode(value, "UTF-8").replace("+", "%20")
     }
 
-    private fun barkQuery(ctx: Context): String {
+    private fun barkQuery(ctx: Context, extraParams: Map<String, String>): String {
         val params = mutableListOf<Pair<String, String>>()
         val group = AppSettings.barkGroup(ctx)
         if (group.isNotBlank()) params.add("group" to group)
@@ -84,6 +88,9 @@ object Bark {
         if (icon.isNotBlank()) params.add("icon" to icon)
         val level = AppSettings.barkLevel(ctx)
         if (level.isNotBlank()) params.add("level" to level)
+        for ((key, value) in extraParams) {
+            if (key.isNotBlank() && value.isNotBlank()) params.add(key to value)
+        }
         if (params.isEmpty()) return ""
         return params.joinToString(prefix = "?", separator = "&") { "${encode(it.first)}=${encode(it.second)}" }
     }

@@ -17,7 +17,9 @@ object RemoteReplyPoller {
         Thread {
             while (running) {
                 try {
-                    if (AppSettings.appEnabled(ctx) && AppSettings.remoteReplyEnabled(ctx)) {
+                    if (AppSettings.appEnabled(ctx) &&
+                        AppSettings.remoteReplyEnabled(ctx) &&
+                        AppSettings.remoteReplyTarget(ctx) != "mac") {
                         pollOnce(ctx.applicationContext)
                     }
                 } catch (e: Exception) {

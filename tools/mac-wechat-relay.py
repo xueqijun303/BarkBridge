@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import subprocess
+import sys
+import time
+import urllib.request
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Poll BarkBridge relay and send replies through Mac WeChat.")
+    parser.add_argument("--poll-url", required=True, help="Relay poll URL, including secret query string.")
+    parser.add_argument("--interval", type=int, default=5, help="Polling interval in seconds.")
+    parser.add_argument("--once", action="store_true", help="Poll once and exit.")
+    parser.add_argument("--dry-run", action="store_true", help="Print replies without operating WeChat.")
+    args = parser.parse_args()
+
+    while True:
+        try:
+            replies = fetch_replies(args.poll_url)
+            for reply in replies:
+                contact = str(reply.get("contact") or "").strip()
+                text = str(reply.get("text") or "").strip()
+                if not contact or not text:
+                    print(f"skip invalid reply: {reply}", flush=True)
+                    continue
+                if args.dry_run:
+                    print(f"dry-run: {contact}: {text}", flush=True)
+                else:
+                    send_wechat(contact, text)
+                    print(f"sent: {contact}", flush=True)
+        except Exception as exc:
+            print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+
+        if args.once:
+            return
+        time.sleep(max(3, args.interval))
+
+
+def fetch_replies(poll_url):
+    request = urllib.request.Request(poll_url, headers={"User-Agent": "BarkBridge-MacRelay/1.0"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if isinstance(payload, list):
+        return payload
+    return payload.get("replies") or []
+
+
+def send_wechat(contact, text):
+    script = r'''
+on run argv
+  set contactName to item 1 of argv
+  set replyText to item 2 of argv
+
+  tell application "WeChat" to activate
+  delay 0.8
+
+  tell application "System Events"
+    tell process "WeChat"
+      set frontmost to true
+    end tell
+
+    set the clipboard to contactName
+    keystroke "f" using command down
+    delay 0.3
+    keystroke "v" using command down
+    delay 0.8
+    key code 36
+    delay 0.8
+
+    set the clipboard to replyText
+    keystroke "v" using command down
+    delay 0.2
+    key code 36
+  end tell
+end run
+'''
+    subprocess.run(["osascript", "-e", script, contact, text], check=True)
+
+
+if __name__ == "__main__":
+    main()

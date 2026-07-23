@@ -231,19 +231,23 @@ class MainActivity : Activity() {
     private fun buildRemoteReplyCard(): LinearLayout {
         val card = card()
         card.addView(sectionTitle("远程回复"))
-        card.addView(text("通过微信通知快捷回复实现。需要中转服务返回 {\"token\":\"...\",\"text\":\"...\"}，且原微信通知仍有效。", 13f, Muted, false).withTop(8))
+        card.addView(text("默认由 Mac 微信执行回复；若改为 Android 快捷回复，则需要微信通知本身带回复按钮。", 13f, Muted, false).withTop(8))
         card.addView(check("启用微信远程回复", AppSettings.remoteReplyEnabled(this)) {
             AppSettings.setRemoteReplyEnabled(this, it)
             RemoteReplyPoller.start(applicationContext)
             refreshStatus()
         }.withTop(10))
+        card.addView(input("回复执行端: mac 或 android", AppSettings.remoteReplyTarget(this)) {
+            AppSettings.setRemoteReplyTarget(this, it.lowercase())
+            refreshStatus()
+        }.withTop(8))
         card.addView(input("可远程回复联系人，留空则使用微信过滤白名单", AppSettings.remoteReplyContacts(this)) {
             AppSettings.setRemoteReplyContacts(this, it)
         }.withTop(8))
         card.addView(input("iPhone 回复页面 URL", AppSettings.remoteReplyPageUrl(this)) {
             AppSettings.setRemoteReplyPageUrl(this, it)
         }.withTop(8))
-        card.addView(input("安卓轮询取回复 URL", AppSettings.remoteReplyPollUrl(this)) {
+        card.addView(input("轮询取回复 URL，Mac 模式给电脑脚本使用", AppSettings.remoteReplyPollUrl(this)) {
             AppSettings.setRemoteReplyPollUrl(this, it)
         }.withTop(8))
         card.addView(input("轮询间隔秒，5-300", AppSettings.remoteReplyPollSeconds(this)) {
@@ -412,7 +416,7 @@ class MainActivity : Activity() {
         card.addView(text("微信通知监听 / 消息详情推送 Bark", 14f, OnCard, false).withTop(12))
         card.addView(text("来电推送 Bark / 联系人名称匹配", 14f, OnCard, false).withTop(8))
         card.addView(text("短信通知 / 通用 App 通知 / 未接来电 / 电量状态", 14f, OnCard, false).withTop(8))
-        card.addView(text("微信白名单远程回复 / Bark 回复链接 / 中转轮询", 14f, OnCard, false).withTop(8))
+        card.addView(text("Mac 微信远程回复 / Bark 回复链接 / 中转轮询", 14f, OnCard, false).withTop(8))
         card.addView(text("后台常驻 / 开机自启动 / 失败补发", 14f, OnCard, false).withTop(8))
         card.addView(button("查看 GitHub 最新版本").apply {
             setOnClickListener { openLatestRelease() }
@@ -624,8 +628,9 @@ class MainActivity : Activity() {
         if (AppSettings.barkKey(this).isBlank()) return "Bark Key 未配置"
         if (!isNotificationListenerEnabled()) return "缺少微信通知监听权限"
         if (!hasPhoneStatePermission()) return "缺少电话状态权限"
+        if (AppSettings.remoteReplyEnabled(this) && AppSettings.remoteReplyTarget(this) !in listOf("mac", "android")) return "远程回复执行端应为 mac 或 android"
         if (AppSettings.remoteReplyEnabled(this) && AppSettings.remoteReplyPageUrl(this).isBlank()) return "远程回复缺少回复页面 URL"
-        if (AppSettings.remoteReplyEnabled(this) && AppSettings.remoteReplyPollUrl(this).isBlank()) return "远程回复缺少轮询 URL"
+        if (AppSettings.remoteReplyEnabled(this) && AppSettings.remoteReplyTarget(this) != "mac" && AppSettings.remoteReplyPollUrl(this).isBlank()) return "远程回复缺少轮询 URL"
         if (QuietHours.isNowQuiet(this)) return "勿扰时段运行中"
         if (PendingPushes.count(this) > 0) return "运行中，有 ${PendingPushes.count(this)} 条待补发"
         return "运行中"
@@ -648,9 +653,9 @@ class MainActivity : Activity() {
     private fun appVersionName(): String {
         return try {
             val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
-            info.versionName ?: "1.3.0"
+            info.versionName ?: "1.3.1"
         } catch (e: Exception) {
-            "1.3.0"
+            "1.3.1"
         }
     }
 

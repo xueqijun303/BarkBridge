@@ -1,4 +1,4 @@
-# BarkBridge v1.3.0
+# BarkBridge v1.3.1
 
 BarkBridge 是一款 Android 工具，可以把选定的微信通知和来电事件转发到 Bark。
 
@@ -16,6 +16,7 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 短信通知、通用 App 通知、未接来电、电量状态转发 / SMS notification, generic app notification, missed-call, and battery-state forwarding
 - 微信白名单远程回复入口 / Remote reply entry for whitelisted WeChat contacts
 - Bark 回复链接和安卓轮询中转服务 / Bark reply links with Android-side relay polling
+- Mac 微信远程回复模式 / Mac WeChat remote reply mode
 - 勿扰时段和重要消息例外 / Quiet hours with important-message exceptions
 - 自定义 Bark 服务器、分组、铃声、图标和通知级别 / Custom Bark server, group, sound, icon, and interruption level
 - 配置导入导出 / Configuration import and export
@@ -38,6 +39,18 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 支持本地属性或 GitHub Secrets 发布签名 / Optional release signing through local properties or GitHub Secrets
 
 ## 最新变化 / What's New
+
+### v1.3.1
+
+- 新增 Mac 微信远程回复模式：即使 Android 微信通知没有快捷回复按钮，也可以生成 Bark 回复链接。
+- Mac 模式下 Android 只负责监听和生成链接，不再轮询消费回复队列。
+- Cloudflare Worker 回复表单会保存联系人名，Mac 轮询后可以自动搜索联系人并发送回复。
+- 新增 `tools/mac-wechat-relay.py`，用于 Mac 后台轮询中转服务并操作 Mac 微信发送。
+
+- Added Mac WeChat remote reply mode: Bark reply links can be generated even when Android WeChat notifications do not expose quick reply.
+- In Mac mode, Android only listens and creates reply links; it no longer consumes the reply queue.
+- The Cloudflare Worker reply form now stores the contact name so the Mac relay can search and send through Mac WeChat.
+- Added `tools/mac-wechat-relay.py` for polling the relay and sending replies through Mac WeChat.
 
 ### v1.3.0
 
@@ -138,8 +151,8 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 The current APK artifacts are included at:
 
 ```text
-release/BarkBridge_v1.3.0-debug.apk
-release/BarkBridge_v1.3.0-release-unsigned.apk
+release/BarkBridge_v1.3.1-debug.apk
+release/BarkBridge_v1.3.1-release-unsigned.apk
 ```
 
 Debug APK 可直接用于测试安装。未签名 release APK 需要签名后再公开分发。
@@ -175,9 +188,9 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## 息屏推送 / Screen-Off Delivery
 
-BarkBridge v1.3.0 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
+BarkBridge v1.3.1 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
 
-BarkBridge v1.3.0 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.3.1 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
 
 App 使用前台服务、通知监听重绑、唤醒锁、后台联网状态检测和失败补发队列，让 Bark 推送在息屏期间尽量保持可用。
 
@@ -201,25 +214,29 @@ If a temporary network failure occurs, BarkBridge queues failed Bark pushes and 
 
 ## 远程回复 / Remote Reply
 
-远程回复的执行端仍然是 Android 手机上的微信 A。iPhone 上的微信 B 不能替微信 A 回复，只作为查看和输入回复内容的入口。
+远程回复的执行端可以是 Android 手机上的微信 A，也可以是 Mac 上同时登录的微信 A。iPhone 上的微信 B 不能替微信 A 回复，只作为查看和输入回复内容的入口。
 
-Remote replies are still executed by WeChat A on the Android phone. WeChat B on iPhone cannot reply on behalf of WeChat A; it only acts as the viewing and input entry.
+Remote replies can be executed by WeChat A on the Android phone or by the same WeChat A logged in on Mac. WeChat B on iPhone cannot reply on behalf of WeChat A; it only acts as the viewing and input entry.
 
 实现链路：
 
 Flow:
 
 - Android 监听微信 A 通知，并匹配联系人白名单。
-- 如果微信通知包含快捷回复动作，BarkBridge 生成短期有效 token。
+- Mac 模式下，BarkBridge 不要求 Android 微信通知带快捷回复按钮，也会生成短期有效 token。
+- Android 模式下，只有微信通知包含快捷回复动作时才会生成 token。
 - Bark 推送到 iPhone，并通过 Bark 的 `url` 参数附带回复页面链接。
 - iPhone 打开回复页面并提交回复内容到你的中转服务。
-- Android 前台服务轮询中转接口，拿到 token 和 text 后调用微信通知快捷回复。
+- Mac 模式下，Mac 脚本轮询中转接口，拿到 contact 和 text 后操作 Mac 微信发送。
+- Android 模式下，Android 前台服务轮询中转接口，拿到 token 和 text 后调用微信通知快捷回复。
 
 - Android listens to WeChat A notifications and matches the contact allowlist.
-- If the WeChat notification contains a quick-reply action, BarkBridge creates a short-lived token.
+- In Mac mode, BarkBridge creates a short-lived token even if the Android WeChat notification does not expose quick reply.
+- In Android mode, a token is created only when the WeChat notification contains a quick-reply action.
 - Bark pushes to iPhone and includes the reply page through Bark's `url` parameter.
 - iPhone opens the reply page and submits the reply text to your relay service.
-- The Android foreground service polls the relay endpoint, receives token and text, then sends the reply through WeChat quick reply.
+- In Mac mode, the Mac relay script polls the relay endpoint, receives contact and text, then sends through Mac WeChat.
+- In Android mode, the Android foreground service polls the relay endpoint, receives token and text, then sends through WeChat quick reply.
 
 中转接口返回格式可以是单条对象、数组，或包含 `replies` 数组的对象：
 
@@ -243,22 +260,45 @@ A Cloudflare Worker sample is included at `relay/cloudflare-worker.js`. Bind a K
 
 ```text
 iPhone 回复页面 URL: https://your-worker.example.workers.dev/reply
-安卓轮询取回复 URL: https://your-worker.example.workers.dev/poll?secret=your-secret
+轮询取回复 URL: https://your-worker.example.workers.dev/poll?secret=your-secret
 ```
+
+Mac 微信远程回复：
+
+Mac WeChat remote reply:
+
+```sh
+python3 tools/mac-wechat-relay.py \
+  --poll-url 'https://your-worker.example.workers.dev/poll?secret=your-secret' \
+  --interval 5
+```
+
+首次运行时，macOS 通常会要求给运行脚本的 App 授予“辅助功能”权限。路径：
+
+On first run, macOS usually requires Accessibility permission for the app running the script:
+
+```text
+系统设置 -> 隐私与安全性 -> 辅助功能
+System Settings -> Privacy & Security -> Accessibility
+```
+
+如果要后台常驻，可以参考 `tools/com.xueqijun.barkbridge.mac-relay.plist.example` 配置 launchd。
+
+For background operation, use `tools/com.xueqijun.barkbridge.mac-relay.plist.example` as a launchd template.
 
 限制：
 
 Limitations:
 
-- 依赖微信通知是否提供快捷回复动作。
-- 原通知仍在、token 未过期时才能回复；当前 token 有效期约 30 分钟。
-- 如果微信版本、系统通知策略或锁屏策略不提供快捷回复，则不会生成回复链接。
-- 暂不包含无障碍自动打开微信输入方案。
+- Android 快捷回复模式依赖微信通知是否提供快捷回复动作。
+- Mac 模式不依赖 Android 通知快捷回复，但 Mac 必须开机、微信必须登录，且不能处于无法执行 UI 自动化的锁屏状态。
+- Android 快捷回复模式要求原通知仍在、token 未过期时才能回复；当前 token 有效期约 30 分钟。
+- Mac 模式依赖 Mac 微信搜索联系人和粘贴发送，微信界面变化可能影响自动化。
 
-- Depends on whether WeChat exposes a quick-reply action in its notification.
-- The original notification must still be valid and the token must not expire; current token lifetime is about 30 minutes.
-- If WeChat, Android notification policy, or lock-screen policy does not expose quick reply, no reply link is generated.
-- Accessibility-based automatic WeChat UI input is not included yet.
+- Android quick-reply mode depends on whether WeChat exposes a quick-reply action in its notification.
+- Mac mode does not depend on Android quick reply, but the Mac must be on, WeChat must be logged in, and the Mac must not be in a locked state that prevents UI automation.
+- Android quick-reply mode requires the original notification to remain valid and the token to stay unexpired; current token lifetime is about 30 minutes.
+- Mac mode depends on Mac WeChat contact search and paste/send automation, so WeChat UI changes may affect it.
 
 ## 构建 / Build
 
@@ -314,6 +354,6 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-推送类似 `v1.3.0` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
+推送类似 `v1.3.1` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
 
-Pushing a tag such as `v1.3.0` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.3.1` builds APKs and publishes them to the GitHub Release page automatically.

@@ -38,6 +38,9 @@ object AppSettings {
     fun remoteReplyEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "remote_reply_enabled")
     fun setRemoteReplyEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "remote_reply_enabled", value)
 
+    fun remoteReplyTarget(ctx: Context): String = Prefs.get(ctx, "remote_reply_target").ifBlank { "mac" }
+    fun setRemoteReplyTarget(ctx: Context, value: String) = Prefs.set(ctx, "remote_reply_target", value.trim().ifBlank { "mac" })
+
     fun remoteReplyContacts(ctx: Context): String = Prefs.get(ctx, "remote_reply_contacts").trim()
     fun setRemoteReplyContacts(ctx: Context, value: String) = Prefs.set(ctx, "remote_reply_contacts", value.trim())
 

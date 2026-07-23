@@ -30,6 +30,12 @@ object RemoteReplyRegistry {
         val pageUrl = AppSettings.remoteReplyPageUrl(ctx)
         if (pageUrl.isBlank()) return null
 
+        if (AppSettings.remoteReplyTarget(ctx) == "mac") {
+            val token = newToken()
+            LogStore.add(ctx, "已生成 Mac 回复令牌: $contact", diagnostic = true, category = "回复")
+            return buildReplyUrl(pageUrl, token, contact, text)
+        }
+
         val action = firstReplyAction(sbn.notification) ?: run {
             LogStore.add(ctx, "微信通知没有快捷回复动作，无法生成远程回复链接", diagnostic = true, category = "回复")
             return null

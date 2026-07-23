@@ -18,11 +18,13 @@ async function saveReply(request, env) {
   if (!env.REPLIES) return new Response("KV binding REPLIES is missing", { status: 500 });
   const form = await request.formData();
   const token = String(form.get("token") || "").trim();
+  const contact = String(form.get("contact") || "").trim();
   const text = String(form.get("text") || "").trim();
-  if (!token || !text) return new Response("Missing token or text", { status: 400 });
+  if (!token) return errorPage("缺少回复令牌", "请从 BarkBridge 推送通知里的回复链接打开，不要直接打开回复页面。");
+  if (!text) return errorPage("缺少回复内容", "请输入要发送给微信联系人的回复内容。");
 
   const id = `${Date.now()}-${crypto.randomUUID()}`;
-  await env.REPLIES.put(`reply:${id}`, JSON.stringify({ id, token, text }), {
+  await env.REPLIES.put(`reply:${id}`, JSON.stringify({ id, token, contact, text }), {
     expirationTtl: 3600,
   });
   return html("Reply saved", "<main><h1>Reply saved</h1><p>You can close this page.</p></main>");
@@ -45,7 +47,11 @@ async function pollReplies(url, env) {
 }
 
 function replyPage(url) {
-  const token = escapeHtml(url.searchParams.get("token") || "");
+  const rawToken = url.searchParams.get("token") || "";
+  if (!rawToken) {
+    return errorPage("没有可用的回复令牌", "这个页面需要从 Bark 通知点击进入。正常链接会带有 token、contact 和 message 参数。");
+  }
+  const token = escapeHtml(rawToken);
   const contact = escapeHtml(url.searchParams.get("contact") || "WeChat");
   const message = escapeHtml(url.searchParams.get("message") || "");
   return html(
@@ -55,6 +61,7 @@ function replyPage(url) {
       <p class="message">${message}</p>
       <form method="post" action="/reply">
         <input type="hidden" name="token" value="${token}">
+        <input type="hidden" name="contact" value="${contact}">
         <textarea name="text" autofocus placeholder="Type reply..." required></textarea>
         <button type="submit">Send to Android</button>
       </form>
@@ -62,7 +69,19 @@ function replyPage(url) {
   );
 }
 
-function html(title, body) {
+function errorPage(title, message) {
+  return html(
+    title,
+    `<main>
+      <h1>${escapeHtml(title)}</h1>
+      <p class="message">${escapeHtml(message)}</p>
+      <p class="hint">如果你是从 Bark 通知点进来的，说明 Android 端没有生成快捷回复 token。请检查 BarkBridge 里的远程回复联系人白名单，以及微信通知栏本身是否有“回复”按钮。</p>
+    </main>`,
+    400
+  );
+}
+
+function html(title, body, status = 200) {
   return new Response(`<!doctype html>
 <html lang="en">
 <head>
@@ -76,10 +95,12 @@ function html(title, body) {
     .message{padding:14px;border:1px solid #d5e4e1;background:#fff;border-radius:8px;line-height:1.5}
     textarea{box-sizing:border-box;width:100%;min-height:150px;margin-top:14px;padding:12px;border:1px solid #c8d8d5;border-radius:8px;font:16px inherit}
     button{width:100%;height:48px;margin-top:12px;border:0;border-radius:8px;background:#007670;color:#fff;font:600 16px inherit}
+    .hint{color:#60716e;line-height:1.55}
   </style>
 </head>
 <body>${body}</body>
 </html>`, {
+    status,
     headers: { "content-type": "text/html; charset=utf-8" },
   });
 }

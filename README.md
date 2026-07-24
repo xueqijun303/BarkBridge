@@ -1,4 +1,4 @@
-# BarkBridge v1.3.2
+# BarkBridge v1.3.3
 
 BarkBridge 是一款 Android 工具，可以把选定的微信通知和来电事件转发到 Bark。
 
@@ -39,6 +39,16 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 支持本地属性或 GitHub Secrets 发布签名 / Optional release signing through local properties or GitHub Secrets
 
 ## 最新变化 / What's New
+
+### v1.3.3
+
+- Mac 远程回复默认开启，并内置当前 Cloudflare Worker 回复页地址。
+- Bark 推送正文中直接显示完整回复 URL，同时仍设置 Bark 的 `url` 跳转参数。
+- 这样即使 Bark 客户端不明显展示跳转按钮，也能从通知正文看到并打开回复链接。
+
+- Mac remote reply is enabled by default and uses the current Cloudflare Worker reply page by default.
+- Bark push bodies now include the full reply URL while still setting Bark's `url` parameter.
+- This makes the reply link visible even when the Bark client does not clearly show the URL action.
 
 ### v1.3.2
 
@@ -161,8 +171,8 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 The current APK artifacts are included at:
 
 ```text
-release/BarkBridge_v1.3.2-debug.apk
-release/BarkBridge_v1.3.2-release-unsigned.apk
+release/BarkBridge_v1.3.3-debug.apk
+release/BarkBridge_v1.3.3-release-unsigned.apk
 ```
 
 Debug APK 可直接用于测试安装。未签名 release APK 需要签名后再公开分发。
@@ -198,9 +208,9 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## 息屏推送 / Screen-Off Delivery
 
-BarkBridge v1.3.2 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
+BarkBridge v1.3.3 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
 
-BarkBridge v1.3.2 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.3.3 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
 
 App 使用前台服务、通知监听重绑、唤醒锁、后台联网状态检测和失败补发队列，让 Bark 推送在息屏期间尽量保持可用。
 
@@ -368,6 +378,6 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-推送类似 `v1.3.2` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
+推送类似 `v1.3.3` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
 
-Pushing a tag such as `v1.3.2` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.3.3` builds APKs and publishes them to the GitHub Release page automatically.

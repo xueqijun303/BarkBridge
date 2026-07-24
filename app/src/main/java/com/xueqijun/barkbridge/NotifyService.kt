@@ -64,7 +64,7 @@ class NotifyService: NotificationListenerService() {
         if (replyUrl.isNullOrBlank()) {
             Bark.send(applicationContext,key,pushTitle,msg)
         } else {
-            Bark.send(applicationContext, key, pushTitle, "$msg\n\n点击通知可远程回复", mapOf("url" to replyUrl))
+            Bark.send(applicationContext, key, pushTitle, "$msg\n\n点击通知可远程回复\n$replyUrl", mapOf("url" to replyUrl))
         }
 
         val logText = if (AppSettings.saveMessageBody(applicationContext)) {

@@ -6,6 +6,7 @@ object AppSettings {
     private const val DEFAULT_SERVER = "https://api.day.app"
     private const val DEFAULT_BLOCK = "广告,拼多多,淘宝"
     private const val DEFAULT_IMPORTANT = "验证码,银行,转账,老板"
+    private const val DEFAULT_REPLY_PAGE = "https://barkbridge-relay.xueqijun303.workers.dev/reply"
 
     fun appEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "app_enabled", true)
     fun setAppEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "app_enabled", value)
@@ -35,7 +36,7 @@ object AppSettings {
     fun lowBatteryThreshold(ctx: Context): String = Prefs.get(ctx, "low_battery_threshold").ifBlank { "20" }
     fun setLowBatteryThreshold(ctx: Context, value: String) = Prefs.set(ctx, "low_battery_threshold", value.trim().ifBlank { "20" })
 
-    fun remoteReplyEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "remote_reply_enabled")
+    fun remoteReplyEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "remote_reply_enabled", true)
     fun setRemoteReplyEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "remote_reply_enabled", value)
 
     fun remoteReplyTarget(ctx: Context): String = Prefs.get(ctx, "remote_reply_target").ifBlank { "mac" }
@@ -44,7 +45,7 @@ object AppSettings {
     fun remoteReplyContacts(ctx: Context): String = Prefs.get(ctx, "remote_reply_contacts").trim()
     fun setRemoteReplyContacts(ctx: Context, value: String) = Prefs.set(ctx, "remote_reply_contacts", value.trim())
 
-    fun remoteReplyPageUrl(ctx: Context): String = Prefs.get(ctx, "remote_reply_page_url").trim()
+    fun remoteReplyPageUrl(ctx: Context): String = Prefs.get(ctx, "remote_reply_page_url").ifBlank { DEFAULT_REPLY_PAGE }.trim()
     fun setRemoteReplyPageUrl(ctx: Context, value: String) = Prefs.set(ctx, "remote_reply_page_url", value.trim())
 
     fun remoteReplyPollUrl(ctx: Context): String = Prefs.get(ctx, "remote_reply_poll_url").trim()

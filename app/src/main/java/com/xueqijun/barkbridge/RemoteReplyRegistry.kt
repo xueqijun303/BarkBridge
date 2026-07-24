@@ -26,16 +26,23 @@ object RemoteReplyRegistry {
 
     fun capture(ctx: Context, sbn: StatusBarNotification, contact: String, text: String): String? {
         if (!AppSettings.remoteReplyEnabled(ctx)) return null
-        if (!allowedContact(ctx, contact)) return null
         val pageUrl = AppSettings.remoteReplyPageUrl(ctx)
-        if (pageUrl.isBlank()) return null
+        if (pageUrl.isBlank()) {
+            LogStore.add(ctx, "远程回复未生成: 缺少 iPhone 回复页面 URL", category = "回复")
+            return null
+        }
 
         if (AppSettings.remoteReplyTarget(ctx) == "mac") {
+            if (!allowedMacContact(ctx, contact)) {
+                LogStore.add(ctx, "远程回复未生成: 联系人未命中 Mac 回复白名单 $contact", category = "回复")
+                return null
+            }
             val token = newToken()
             LogStore.add(ctx, "已生成 Mac 回复令牌: $contact", diagnostic = true, category = "回复")
             return buildReplyUrl(pageUrl, token, contact, text)
         }
 
+        if (!allowedAndroidContact(ctx, contact)) return null
         val action = firstReplyAction(sbn.notification) ?: run {
             LogStore.add(ctx, "微信通知没有快捷回复动作，无法生成远程回复链接", diagnostic = true, category = "回复")
             return null
@@ -93,7 +100,14 @@ object RemoteReplyRegistry {
         }
     }
 
-    private fun allowedContact(ctx: Context, contact: String): Boolean {
+    private fun allowedMacContact(ctx: Context, contact: String): Boolean {
+        val configured = AppSettings.remoteReplyContacts(ctx)
+        val keywords = AppSettings.keywordList(configured)
+        if (keywords.isEmpty()) return true
+        return keywords.any { contact.contains(it, ignoreCase = true) }
+    }
+
+    private fun allowedAndroidContact(ctx: Context, contact: String): Boolean {
         val configured = AppSettings.remoteReplyContacts(ctx).ifBlank { AppSettings.allowedContacts(ctx) }
         val keywords = AppSettings.keywordList(configured)
         if (keywords.isEmpty()) return false

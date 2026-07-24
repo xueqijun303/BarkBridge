@@ -241,7 +241,7 @@ class MainActivity : Activity() {
             AppSettings.setRemoteReplyTarget(this, it.lowercase())
             refreshStatus()
         }.withTop(8))
-        card.addView(input("可远程回复联系人，留空则使用微信过滤白名单", AppSettings.remoteReplyContacts(this)) {
+        card.addView(input("Mac 回复白名单，留空则所有已推送微信都带回复链接", AppSettings.remoteReplyContacts(this)) {
             AppSettings.setRemoteReplyContacts(this, it)
         }.withTop(8))
         card.addView(input("iPhone 回复页面 URL", AppSettings.remoteReplyPageUrl(this)) {
@@ -653,9 +653,9 @@ class MainActivity : Activity() {
     private fun appVersionName(): String {
         return try {
             val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
-            info.versionName ?: "1.3.1"
+            info.versionName ?: "1.3.2"
         } catch (e: Exception) {
-            "1.3.1"
+            "1.3.2"
         }
     }
 

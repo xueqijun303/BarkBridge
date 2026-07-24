@@ -1,4 +1,4 @@
-# BarkBridge v1.3.1
+# BarkBridge v1.3.2
 
 BarkBridge 是一款 Android 工具，可以把选定的微信通知和来电事件转发到 Bark。
 
@@ -39,6 +39,16 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 支持本地属性或 GitHub Secrets 发布签名 / Optional release signing through local properties or GitHub Secrets
 
 ## 最新变化 / What's New
+
+### v1.3.2
+
+- 修正 Mac 微信远程回复模式生成链接过于严格的问题。
+- Mac 模式下，“Mac 回复白名单”留空时，所有已正常推送到 Bark 的微信消息都会附带回复链接。
+- 如果缺少回复页面 URL 或联系人未命中白名单，App 会在“回复”日志里明确记录原因。
+
+- Fixed overly strict reply-link generation in Mac WeChat remote reply mode.
+- In Mac mode, when the Mac reply allowlist is empty, every WeChat message already forwarded to Bark gets a reply link.
+- If the reply page URL is missing or a contact does not match the allowlist, the app logs the reason under the reply category.
 
 ### v1.3.1
 
@@ -151,8 +161,8 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 The current APK artifacts are included at:
 
 ```text
-release/BarkBridge_v1.3.1-debug.apk
-release/BarkBridge_v1.3.1-release-unsigned.apk
+release/BarkBridge_v1.3.2-debug.apk
+release/BarkBridge_v1.3.2-release-unsigned.apk
 ```
 
 Debug APK 可直接用于测试安装。未签名 release APK 需要签名后再公开分发。
@@ -188,9 +198,9 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## 息屏推送 / Screen-Off Delivery
 
-BarkBridge v1.3.1 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
+BarkBridge v1.3.2 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
 
-BarkBridge v1.3.1 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.3.2 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
 
 App 使用前台服务、通知监听重绑、唤醒锁、后台联网状态检测和失败补发队列，让 Bark 推送在息屏期间尽量保持可用。
 
@@ -262,6 +272,10 @@ A Cloudflare Worker sample is included at `relay/cloudflare-worker.js`. Bind a K
 iPhone 回复页面 URL: https://your-worker.example.workers.dev/reply
 轮询取回复 URL: https://your-worker.example.workers.dev/poll?secret=your-secret
 ```
+
+Mac 模式下，如果“Mac 回复白名单”留空，所有已正常推送到 Bark 的微信通知都会带回复链接。需要限制联系人时，再填写微信通知标题里显示的联系人名。
+
+In Mac mode, if the Mac reply allowlist is empty, every WeChat notification already forwarded to Bark includes a reply link. Fill it only when you want to restrict reply-enabled contacts.
 
 Mac 微信远程回复：
 
@@ -354,6 +368,6 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-推送类似 `v1.3.1` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
+推送类似 `v1.3.2` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
 
-Pushing a tag such as `v1.3.1` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.3.2` builds APKs and publishes them to the GitHub Release page automatically.

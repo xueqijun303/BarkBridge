@@ -1,3 +1,66 @@
+export class RelayRoom {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+    this.queue = [];
+    this.waiters = [];
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === "/enqueue" && request.method === "POST") {
+      const reply = await request.json();
+      this.enqueue(reply);
+      return Response.json({ ok: true });
+    }
+    if (url.pathname === "/dequeue" && request.method === "GET") {
+      if (this.queue.length > 0) {
+        return Response.json({ replies: this.queue.splice(0, this.queue.length) });
+      }
+      return this.waitForReply();
+    }
+    return new Response("Not found", { status: 404 });
+  }
+
+  enqueue(reply) {
+    this.pruneWaiters();
+    const waiter = this.waiters.shift();
+    if (waiter) {
+      clearTimeout(waiter.timer);
+      waiter.resolve(Response.json({ replies: [reply] }));
+      return;
+    }
+    this.queue.push(reply);
+    while (this.queue.length > 200) this.queue.shift();
+  }
+
+  waitForReply() {
+    return new Promise((resolve) => {
+      const waiter = {
+        resolve,
+        expiresAt: Date.now() + 25000,
+      };
+      waiter.timer = setTimeout(() => {
+        const index = this.waiters.indexOf(waiter);
+        if (index >= 0) this.waiters.splice(index, 1);
+        resolve(Response.json({ replies: [] }));
+      }, 25000);
+      this.waiters.push(waiter);
+    });
+  }
+
+  pruneWaiters() {
+    const now = Date.now();
+    for (let i = this.waiters.length - 1; i >= 0; i--) {
+      if (this.waiters[i].expiresAt <= now) {
+        clearTimeout(this.waiters[i].timer);
+        this.waiters[i].resolve(Response.json({ replies: [] }));
+        this.waiters.splice(i, 1);
+      }
+    }
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -14,8 +77,12 @@ export default {
   },
 };
 
+function relayStub(env) {
+  const id = env.RELAY.idFromName("barkbridge-main");
+  return env.RELAY.get(id);
+}
+
 async function saveReply(request, env) {
-  if (!env.REPLIES) return new Response("KV binding REPLIES is missing", { status: 500 });
   try {
     const form = await request.formData();
     const token = String(form.get("token") || "").trim();
@@ -25,10 +92,11 @@ async function saveReply(request, env) {
     if (!text) return errorPage("缺少回复内容", "请输入要发送给微信联系人的回复内容。");
 
     const id = `${Date.now()}-${crypto.randomUUID()}`;
-    await env.REPLIES.put(`reply:${id}`, JSON.stringify({ id, token, contact, text }), {
-      expirationTtl: 3600,
+    await relayStub(env).fetch("https://relay.local/enqueue", {
+      method: "POST",
+      body: JSON.stringify({ id, token, contact, text, createdAt: Date.now() }),
+      headers: { "content-type": "application/json" },
     });
-    await enqueueReply(env, id);
     return html("Reply saved", "<main><h1>Reply saved</h1><p>You can close this page.</p></main>");
   } catch (error) {
     return workerError(error);
@@ -36,48 +104,15 @@ async function saveReply(request, env) {
 }
 
 async function pollReplies(url, env) {
-  if (!env.REPLIES) return Response.json({ replies: [] }, { status: 500 });
   if (env.REPLY_SECRET && url.searchParams.get("secret") !== env.REPLY_SECRET) {
     return Response.json({ replies: [] }, { status: 403 });
   }
 
   try {
-    const ids = await readQueue(env);
-    const replies = [];
-    const pending = [];
-    for (const id of ids) {
-      const key = `reply:${id}`;
-      const raw = await env.REPLIES.get(key);
-      if (raw) {
-        replies.push(JSON.parse(raw));
-        await env.REPLIES.delete(key);
-      } else {
-        pending.push(id);
-      }
-    }
-    await writeQueue(env, pending);
-    return Response.json({ replies });
+    return await relayStub(env).fetch("https://relay.local/dequeue");
   } catch (error) {
     return workerError(error);
   }
-}
-
-async function enqueueReply(env, id) {
-  const queue = await readQueue(env);
-  queue.push(id);
-  const uniqueQueue = Array.from(new Set(queue)).slice(-200);
-  await writeQueue(env, uniqueQueue);
-}
-
-async function readQueue(env) {
-  const raw = await env.REPLIES.get("__queue");
-  if (!raw) return [];
-  const parsed = JSON.parse(raw);
-  return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
-}
-
-async function writeQueue(env, queue) {
-  await env.REPLIES.put("__queue", JSON.stringify(queue), { expirationTtl: 3600 });
 }
 
 function replyPage(url) {
@@ -97,7 +132,7 @@ function replyPage(url) {
         <input type="hidden" name="token" value="${token}">
         <input type="hidden" name="contact" value="${contact}">
         <textarea name="text" autofocus placeholder="Type reply..." required></textarea>
-        <button type="submit">Send to Android</button>
+        <button type="submit">Send to Mac</button>
       </form>
     </main>`
   );
@@ -109,7 +144,7 @@ function errorPage(title, message) {
     `<main>
       <h1>${escapeHtml(title)}</h1>
       <p class="message">${escapeHtml(message)}</p>
-      <p class="hint">如果你是从 Bark 通知点进来的，说明 Android 端没有生成快捷回复 token。请检查 BarkBridge 里的远程回复联系人白名单，以及微信通知栏本身是否有“回复”按钮。</p>
+      <p class="hint">请从 Bark 通知里的回复链接打开，不要直接打开基础回复页面。</p>
     </main>`,
     400
   );

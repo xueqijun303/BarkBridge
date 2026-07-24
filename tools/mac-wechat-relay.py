@@ -12,7 +12,7 @@ import urllib.request
 def main():
     parser = argparse.ArgumentParser(description="Poll BarkBridge relay and send replies through Mac WeChat.")
     parser.add_argument("--poll-url", required=True, help="Relay poll URL, including secret query string.")
-    parser.add_argument("--interval", type=int, default=5, help="Polling interval in seconds.")
+    parser.add_argument("--interval", type=int, default=1, help="Delay after each poll in seconds.")
     parser.add_argument("--once", action="store_true", help="Poll once and exit.")
     parser.add_argument("--dry-run", action="store_true", help="Print replies without operating WeChat.")
     args = parser.parse_args()
@@ -43,7 +43,7 @@ def main():
 def fetch_replies(poll_url):
     request = urllib.request.Request(poll_url, headers={"User-Agent": "BarkBridge-MacRelay/1.0"})
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with urllib.request.urlopen(request, timeout=35) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")

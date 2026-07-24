@@ -42,14 +42,20 @@ async function pollReplies(url, env) {
   }
 
   try {
-    const ids = await dequeueReplyIds(env);
+    const ids = await readQueue(env);
     const replies = [];
+    const pending = [];
     for (const id of ids) {
       const key = `reply:${id}`;
       const raw = await env.REPLIES.get(key);
-      if (raw) replies.push(JSON.parse(raw));
-      await env.REPLIES.delete(key);
+      if (raw) {
+        replies.push(JSON.parse(raw));
+        await env.REPLIES.delete(key);
+      } else {
+        pending.push(id);
+      }
     }
+    await writeQueue(env, pending);
     return Response.json({ replies });
   } catch (error) {
     return workerError(error);
@@ -60,13 +66,7 @@ async function enqueueReply(env, id) {
   const queue = await readQueue(env);
   queue.push(id);
   const uniqueQueue = Array.from(new Set(queue)).slice(-200);
-  await env.REPLIES.put("__queue", JSON.stringify(uniqueQueue), { expirationTtl: 3600 });
-}
-
-async function dequeueReplyIds(env) {
-  const queue = await readQueue(env);
-  await env.REPLIES.put("__queue", JSON.stringify([]), { expirationTtl: 3600 });
-  return queue;
+  await writeQueue(env, uniqueQueue);
 }
 
 async function readQueue(env) {
@@ -74,6 +74,10 @@ async function readQueue(env) {
   if (!raw) return [];
   const parsed = JSON.parse(raw);
   return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
+}
+
+async function writeQueue(env, queue) {
+  await env.REPLIES.put("__queue", JSON.stringify(queue), { expirationTtl: 3600 });
 }
 
 function replyPage(url) {

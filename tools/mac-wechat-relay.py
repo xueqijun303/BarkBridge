@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -25,6 +26,7 @@ def main():
                 if not contact or not text:
                     print(f"skip invalid reply: {reply}", flush=True)
                     continue
+                print(f"picked: {contact}: {text[:40]}", flush=True)
                 if args.dry_run:
                     print(f"dry-run: {contact}: {text}", flush=True)
                 else:
@@ -58,29 +60,32 @@ on run argv
   set replyText to item 2 of argv
 
   tell application "WeChat" to activate
-  delay 0.8
+  delay 1
 
   tell application "System Events"
     tell process "WeChat"
       set frontmost to true
+      click menu item "搜索" of menu 1 of menu bar item "编辑" of menu bar 1
     end tell
+    delay 0.5
 
     set the clipboard to contactName
-    keystroke "f" using command down
-    delay 0.3
     keystroke "v" using command down
-    delay 0.8
+    delay 1.2
     key code 36
-    delay 0.8
+    delay 1
 
     set the clipboard to replyText
     keystroke "v" using command down
-    delay 0.2
+    delay 0.4
     key code 36
   end tell
 end run
 '''
-    subprocess.run(["osascript", "-e", script, contact, text], check=True)
+    osascript_bin = "/Applications/BarkBridgeOsascript.app/Contents/MacOS/BarkBridgeOsascript"
+    if not os.path.exists(osascript_bin):
+        osascript_bin = "/usr/bin/osascript"
+    subprocess.run([osascript_bin, "-e", script, contact, text], check=True, timeout=20)
 
 
 if __name__ == "__main__":

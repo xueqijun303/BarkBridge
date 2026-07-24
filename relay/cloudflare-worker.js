@@ -16,18 +16,23 @@ export default {
 
 async function saveReply(request, env) {
   if (!env.REPLIES) return new Response("KV binding REPLIES is missing", { status: 500 });
-  const form = await request.formData();
-  const token = String(form.get("token") || "").trim();
-  const contact = String(form.get("contact") || "").trim();
-  const text = String(form.get("text") || "").trim();
-  if (!token) return errorPage("缺少回复令牌", "请从 BarkBridge 推送通知里的回复链接打开，不要直接打开回复页面。");
-  if (!text) return errorPage("缺少回复内容", "请输入要发送给微信联系人的回复内容。");
+  try {
+    const form = await request.formData();
+    const token = String(form.get("token") || "").trim();
+    const contact = String(form.get("contact") || "").trim();
+    const text = String(form.get("text") || "").trim();
+    if (!token) return errorPage("缺少回复令牌", "请从 BarkBridge 推送通知里的回复链接打开，不要直接打开回复页面。");
+    if (!text) return errorPage("缺少回复内容", "请输入要发送给微信联系人的回复内容。");
 
-  const id = `${Date.now()}-${crypto.randomUUID()}`;
-  await env.REPLIES.put(`reply:${id}`, JSON.stringify({ id, token, contact, text }), {
-    expirationTtl: 3600,
-  });
-  return html("Reply saved", "<main><h1>Reply saved</h1><p>You can close this page.</p></main>");
+    const id = `${Date.now()}-${crypto.randomUUID()}`;
+    await env.REPLIES.put(`reply:${id}`, JSON.stringify({ id, token, contact, text }), {
+      expirationTtl: 3600,
+    });
+    await enqueueReply(env, id);
+    return html("Reply saved", "<main><h1>Reply saved</h1><p>You can close this page.</p></main>");
+  } catch (error) {
+    return workerError(error);
+  }
 }
 
 async function pollReplies(url, env) {
@@ -36,14 +41,39 @@ async function pollReplies(url, env) {
     return Response.json({ replies: [] }, { status: 403 });
   }
 
-  const list = await env.REPLIES.list({ prefix: "reply:", limit: 50 });
-  const replies = [];
-  for (const key of list.keys) {
-    const raw = await env.REPLIES.get(key.name);
-    if (raw) replies.push(JSON.parse(raw));
-    await env.REPLIES.delete(key.name);
+  try {
+    const ids = await dequeueReplyIds(env);
+    const replies = [];
+    for (const id of ids) {
+      const key = `reply:${id}`;
+      const raw = await env.REPLIES.get(key);
+      if (raw) replies.push(JSON.parse(raw));
+      await env.REPLIES.delete(key);
+    }
+    return Response.json({ replies });
+  } catch (error) {
+    return workerError(error);
   }
-  return Response.json({ replies });
+}
+
+async function enqueueReply(env, id) {
+  const queue = await readQueue(env);
+  queue.push(id);
+  const uniqueQueue = Array.from(new Set(queue)).slice(-200);
+  await env.REPLIES.put("__queue", JSON.stringify(uniqueQueue), { expirationTtl: 3600 });
+}
+
+async function dequeueReplyIds(env) {
+  const queue = await readQueue(env);
+  await env.REPLIES.put("__queue", JSON.stringify([]), { expirationTtl: 3600 });
+  return queue;
+}
+
+async function readQueue(env) {
+  const raw = await env.REPLIES.get("__queue");
+  if (!raw) return [];
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
 }
 
 function replyPage(url) {
@@ -79,6 +109,13 @@ function errorPage(title, message) {
     </main>`,
     400
   );
+}
+
+function workerError(error) {
+  return Response.json({
+    error: String(error && error.message ? error.message : error),
+    name: String(error && error.name ? error.name : "Error"),
+  }, { status: 500 });
 }
 
 function html(title, body, status = 200) {

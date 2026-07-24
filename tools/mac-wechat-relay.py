@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 
 
@@ -39,8 +40,12 @@ def main():
 
 def fetch_replies(poll_url):
     request = urllib.request.Request(poll_url, headers={"User-Agent": "BarkBridge-MacRelay/1.0"})
-    with urllib.request.urlopen(request, timeout=20) as response:
-        payload = json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {exc.code}: {body[:300]}") from exc
     if isinstance(payload, list):
         return payload
     return payload.get("replies") or []

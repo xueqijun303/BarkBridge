@@ -12,7 +12,7 @@
     <string>--poll-url</string>
     <string>https://barkbridge-relay.xueqijun303.workers.dev/poll?secret=PUT_SECRET_HERE</string>
     <string>--interval</string>
-    <string>5</string>
+    <string>1</string>
   </array>
   <key>RunAtLoad</key>
   <true/>

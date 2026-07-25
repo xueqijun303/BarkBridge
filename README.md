@@ -294,7 +294,35 @@ Mac WeChat remote reply:
 ```sh
 python3 tools/mac-wechat-relay.py \
   --poll-url 'https://your-worker.example.workers.dev/poll?secret=your-secret' \
-  --interval 5
+  --interval 1
+```
+
+Mac relay 支持本地失败重试队列，默认保存在：
+
+The Mac relay keeps a local retry queue for failed sends:
+
+```text
+~/.barkbridge/pending_replies.json
+```
+
+如果要让 Mac 发送成功或失败后再推一条 Bark 回执，可以传入完整 Bark endpoint：
+
+To send Bark receipts after Mac send success or failure, pass a full Bark endpoint:
+
+```sh
+python3 tools/mac-wechat-relay.py \
+  --poll-url 'https://your-worker.example.workers.dev/poll?secret=your-secret' \
+  --receipt-url 'https://api.day.app/your-bark-key'
+```
+
+Mac relay 会记录阶段化日志：
+
+The Mac relay writes staged logs:
+
+```text
+picked: 联系人: 回复内容
+sent: 联系人
+queued retry 1/5: 联系人
 ```
 
 首次运行时，macOS 通常会要求给运行脚本的 App 授予“辅助功能”权限。路径：

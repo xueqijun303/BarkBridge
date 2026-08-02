@@ -43,6 +43,9 @@ AMBIGUOUS_CONTACTS = {
     "薛",
     "于磊",
 }
+NON_STANDARD_CHAT_TARGETS = {
+    "微信ClawBot",
+}
 DEFAULT_CONTACT_RULES = {
     "default_auto_send": False,
     "rules": {
@@ -57,7 +60,7 @@ DEFAULT_CONTACT_RULES = {
         "罗虎、于磊": {"target": "罗虎、于磊", "auto_send": True},
         "胖叔叔": {"target": "胖叔叔", "auto_send": True},
         "可可": {"target": "可可", "auto_send": True},
-        "微信ClawBot": {"target": "微信ClawBot", "auto_send": True},
+        "微信ClawBot": {"target": "微信ClawBot", "auto_send": False},
         "吴鹏好物捡漏群": {"target": "吴鹏好物捡漏群", "auto_send": True},
         "家": {"target": "XQJ家庭群", "auto_send": False},
         "薛": {"target": "薛", "auto_send": False},
@@ -678,10 +681,12 @@ def resolve_contact_rule(contact):
     if isinstance(raw_rule, dict):
         target = str(raw_rule.get("target") or contact).strip() or contact
         auto_send = bool(raw_rule.get("auto_send"))
+        if target in NON_STANDARD_CHAT_TARGETS:
+            auto_send = False
         return {
             "target": target,
             "auto_send": auto_send,
-            "reason": "联系人规则要求人工确认" if not auto_send else "联系人规则允许自动发送",
+            "reason": "非标准微信聊天结果，要求人工确认" if target in NON_STANDARD_CHAT_TARGETS else ("联系人规则要求人工确认" if not auto_send else "联系人规则允许自动发送"),
         }
     if is_risky_contact_name(contact):
         return {

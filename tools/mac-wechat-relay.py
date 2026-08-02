@@ -741,10 +741,7 @@ def send_receipt(receipt_url, title, body):
 
 def send_wechat(contact, text, send_shortcut):
     bounds = get_wechat_window_bounds()
-    if contact in VISIBLE_CONTACTS:
-        select_visible_contact(contact, bounds)
-    else:
-        select_contact_by_search(contact, bounds)
+    select_contact_by_search(contact, bounds)
     click_message_input(bounds)
     paste_and_send(text, send_shortcut)
 
@@ -770,19 +767,34 @@ on run argv
   tell application "System Events"
     tell process "WeChat"
       set frontmost to true
+      key code 53
+      delay 0.2
+      set mainWindow to missing value
+      repeat with candidateWindow in windows
+        if name of candidateWindow is "微信" then
+          set mainWindow to candidateWindow
+          exit repeat
+        end if
+      end repeat
+      if mainWindow is missing value then
+        set mainWindow to window 1
+      end if
       try
-        set value of attribute "AXMinimized" of window 1 to false
+        set value of attribute "AXMinimized" of mainWindow to false
       end try
       try
-        set position of window 1 to {0, 0}
-        set size of window 1 to {1440, 900}
+        perform action "AXRaise" of mainWindow
+      end try
+      try
+        set position of mainWindow to {0, 0}
+        set size of mainWindow to {1440, 900}
       end try
       delay 0.2
 
-      set windowPosition to position of window 1
+      set windowPosition to position of mainWindow
       set windowLeft to item 1 of windowPosition
       set windowTop to item 2 of windowPosition
-      set windowSize to size of window 1
+      set windowSize to size of mainWindow
       set windowWidth to item 1 of windowSize
       set windowHeight to item 2 of windowSize
       return (windowLeft as text) & "," & (windowTop as text) & "," & (windowWidth as text) & "," & (windowHeight as text)
@@ -817,12 +829,16 @@ def click_at(x, y):
 
 
 def select_contact_by_search(contact, bounds):
-    click_at(bounds["left"] + 150, bounds["top"] + 28)
-    time.sleep(0.2)
     script = r'''
 on run argv
   set contactName to item 1 of argv
   tell application "System Events"
+    tell process "WeChat"
+      click menu item "聊天" of menu 1 of menu bar item "窗口" of menu bar 1
+      delay 0.3
+      click menu item "搜索" of menu 1 of menu bar item "编辑" of menu bar 1
+    end tell
+    delay 0.2
     set the clipboard to contactName
     keystroke "a" using command down
     delay 0.1
@@ -832,16 +848,9 @@ end run
 '''
     subprocess.run([osascript_bin(), "-e", script, contact], check=True, timeout=10)
     time.sleep(0.9)
-    script = r'''
-on run argv
-  tell application "System Events"
-    key code 125
-    delay 0.1
-    key code 36
-  end tell
-end run
-'''
-    subprocess.run([osascript_bin(), "-e", script], check=True, timeout=10)
+    # Click the first local chat result. This avoids relying on the mutable
+    # pinned-chat order while also skipping collection/media/file results.
+    click_at(bounds["left"] + 230, bounds["top"] + 168)
     time.sleep(0.9)
 
 

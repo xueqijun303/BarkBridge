@@ -17,6 +17,7 @@ PENDING_PATH = os.path.expanduser("~/.barkbridge/pending_replies.json")
 CONTACTS_PATH = os.path.expanduser("~/.barkbridge/local_contacts.json")
 HISTORY_PATH = os.path.expanduser("~/.barkbridge/local_history.json")
 CONTACT_RULES_PATH = os.path.expanduser("~/.barkbridge/contact_rules.json")
+PROCESSED_PATH = os.path.expanduser("~/.barkbridge/processed_replies.json")
 SEND_LOCK = threading.Lock()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CLICK_HELPER_SOURCE = os.path.join(SCRIPT_DIR, "mac-click.swift")
@@ -610,6 +611,9 @@ def process_replies(replies, args):
             print(f"dry-run: {contact}: {text}", flush=True)
             continue
         rule = resolve_contact_rule(contact)
+        if is_recently_processed(rule["target"], text):
+            print(f"skip duplicate: {contact} -> {rule['target']}", flush=True)
+            continue
         if not rule["auto_send"]:
             stage_manual_review(contact, text, rule["target"])
             print(f"manual-review: {contact} -> {rule['target']} ({rule['reason']})", flush=True)
@@ -618,6 +622,7 @@ def process_replies(replies, args):
         try:
             with SEND_LOCK:
                 send_wechat(rule["target"], text, args.send_shortcut)
+            remember_processed(rule["target"], text)
             print(f"sent-action: {contact} -> {rule['target']}", flush=True)
         except Exception as exc:
             normalized["attempts"] = attempts + 1
@@ -724,6 +729,44 @@ def save_pending(replies):
     os.makedirs(os.path.dirname(PENDING_PATH), exist_ok=True)
     with open(PENDING_PATH, "w", encoding="utf-8") as fh:
         json.dump(replies, fh, ensure_ascii=False, indent=2)
+
+
+def load_processed():
+    try:
+        with open(PROCESSED_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, list) else []
+    except FileNotFoundError:
+        return []
+    except Exception as exc:
+        print(f"error: failed to load processed replies: {exc}", file=sys.stderr, flush=True)
+        return []
+
+
+def processed_key(contact, text):
+    return f"{str(contact).strip()}\n{str(text).strip()}"
+
+
+def is_recently_processed(contact, text, window_seconds=1800):
+    now = int(time.time())
+    key = processed_key(contact, text)
+    return any(
+        item.get("key") == key and now - int(item.get("time") or 0) <= window_seconds
+        for item in load_processed()
+        if isinstance(item, dict)
+    )
+
+
+def remember_processed(contact, text):
+    now = int(time.time())
+    items = [
+        item for item in load_processed()
+        if isinstance(item, dict) and now - int(item.get("time") or 0) <= 86400
+    ]
+    items.append({"key": processed_key(contact, text), "time": now})
+    os.makedirs(os.path.dirname(PROCESSED_PATH), exist_ok=True)
+    with open(PROCESSED_PATH, "w", encoding="utf-8") as fh:
+        json.dump(items[-300:], fh, ensure_ascii=False, indent=2)
 
 
 def send_receipt(receipt_url, title, body):
@@ -843,14 +886,12 @@ on run argv
     keystroke "a" using command down
     delay 0.1
     keystroke "v" using command down
+    delay 0.5
+    key code 36
   end tell
 end run
 '''
     subprocess.run([osascript_bin(), "-e", script, contact], check=True, timeout=10)
-    time.sleep(0.9)
-    # Click the first local chat result. This avoids relying on the mutable
-    # pinned-chat order while also skipping collection/media/file results.
-    click_at(bounds["left"] + 230, bounds["top"] + 168)
     time.sleep(0.9)
 
 

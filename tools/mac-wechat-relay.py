@@ -5,6 +5,7 @@ import html
 import http.server
 import json
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -43,7 +44,7 @@ AMBIGUOUS_CONTACTS = {
     "薛",
     "于磊",
 }
-NON_STANDARD_CHAT_TARGETS = {
+COMMAND_ADAPTER_TARGETS = {
     "微信ClawBot",
 }
 DEFAULT_CONTACT_RULES = {
@@ -681,12 +682,12 @@ def resolve_contact_rule(contact):
     if isinstance(raw_rule, dict):
         target = str(raw_rule.get("target") or contact).strip() or contact
         auto_send = bool(raw_rule.get("auto_send"))
-        if target in NON_STANDARD_CHAT_TARGETS:
+        if target in COMMAND_ADAPTER_TARGETS and not command_adapter_for(target, raw_rule):
             auto_send = False
         return {
             "target": target,
             "auto_send": auto_send,
-            "reason": "非标准微信聊天结果，要求人工确认" if target in NON_STANDARD_CHAT_TARGETS else ("联系人规则要求人工确认" if not auto_send else "联系人规则允许自动发送"),
+            "reason": "未配置专用命令适配器，要求人工确认" if target in COMMAND_ADAPTER_TARGETS and not command_adapter_for(target, raw_rule) else ("联系人规则要求人工确认" if not auto_send else "联系人规则允许自动发送"),
         }
     if is_risky_contact_name(contact):
         return {
@@ -788,10 +789,43 @@ def send_receipt(receipt_url, title, body):
 
 
 def send_wechat(contact, text, send_shortcut):
+    if contact in COMMAND_ADAPTER_TARGETS:
+        send_command_adapter(contact, text)
+        return
     bounds = get_wechat_window_bounds()
     select_contact_by_search(contact, bounds)
     click_message_input(bounds)
     paste_and_send(text, send_shortcut)
+
+
+def command_adapter_for(contact, rule=None):
+    env_name = f"BARKBRIDGE_{contact.upper()}_COMMAND"
+    env_command = os.environ.get(env_name)
+    if env_command:
+        return env_command
+    if contact == "微信ClawBot":
+        env_command = os.environ.get("BARKBRIDGE_CLAWBOT_COMMAND")
+        if env_command:
+            return env_command
+    if isinstance(rule, dict):
+        command = str(rule.get("command") or "").strip()
+        if command:
+            return command
+    return ""
+
+
+def send_command_adapter(contact, text):
+    command = command_adapter_for(contact, load_contact_rules().get("rules", {}).get(contact))
+    if not command:
+        stage_manual_review(contact, text, contact)
+        raise RuntimeError(f"{contact} 未配置专用命令适配器，已复制内容，未自动发送")
+    args = [
+        part.replace("{contact}", contact).replace("{text}", text)
+        for part in shlex.split(command)
+    ]
+    if "{text}" not in command:
+        args.append(text)
+    subprocess.run(args, check=True, timeout=60)
 
 
 def osascript_bin():

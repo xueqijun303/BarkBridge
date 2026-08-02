@@ -22,9 +22,9 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CLICK_HELPER_SOURCE = os.path.join(SCRIPT_DIR, "mac-click.swift")
 CLICK_HELPER_BIN = os.path.join(SCRIPT_DIR, "mac-click")
 VISIBLE_CONTACTS = [
+    "XQJ家庭群",
     "幸福一家人",
     "2026春节小聚群",
-    "XQJ家庭群",
     "于磊",
     "薛启军工作号",
     "银河湾小院",
@@ -36,7 +36,6 @@ VISIBLE_CONTACTS = [
     "微信ClawBot",
     "吴鹏好物捡漏群",
     "悍刀",
-    "罗虎、于磊",
 ]
 AMBIGUOUS_CONTACTS = {
     "家",
@@ -742,7 +741,10 @@ def send_receipt(receipt_url, title, body):
 
 def send_wechat(contact, text, send_shortcut):
     bounds = get_wechat_window_bounds()
-    select_contact_by_search(contact, bounds)
+    if contact in VISIBLE_CONTACTS:
+        select_visible_contact(contact, bounds)
+    else:
+        select_contact_by_search(contact, bounds)
     click_message_input(bounds)
     paste_and_send(text, send_shortcut)
 
@@ -799,7 +801,7 @@ def select_visible_contact(contact, bounds):
     index = VISIBLE_CONTACTS.index(contact)
     # The visible contact list is pinned on the left. Normalizing the WeChat
     # window above keeps these row coordinates stable and avoids search hits.
-    click_at(bounds["left"] + 105, bounds["top"] + 85 + (index * 66))
+    click_at(bounds["left"] + 240, bounds["top"] + 98 + (index * 90))
     time.sleep(0.8)
 
 

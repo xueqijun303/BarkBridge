@@ -291,7 +291,7 @@ function wechatPage({ title, mode, secret, token, selectedContact, message }) {
     .top{position:sticky;top:0;z-index:3;background:#202327;border-bottom:1px solid var(--line);padding:calc(12px + env(safe-area-inset-top)) 14px 12px}
     .title{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;margin-bottom:10px}
     .title strong{font-size:21px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.title span{color:var(--muted);font-size:14px}
-    .search input{width:100%;height:46px;border:0;border-radius:8px;background:#2d3035;color:var(--text);outline:none;padding:0 14px;font:18px inherit}
+    .search input{width:100%;height:48px;border:0;border-radius:8px;background:#2d3035;color:var(--text);outline:none;padding:0 14px;font:20px inherit}
     .content{min-height:0;overflow:auto;padding-bottom:146px}
     .contacts{display:grid;grid-template-columns:1fr;gap:8px;max-height:36svh;overflow:auto;padding:12px 14px;background:#202327;border-bottom:1px solid var(--line)}
     .contact{width:100%;min-width:0;border:1px solid #3a4046;background:#2a2d31;color:var(--text);display:grid;grid-template-columns:42px minmax(0,1fr);gap:10px;align-items:center;text-align:left;padding:10px 12px;border-radius:8px;cursor:pointer}
@@ -305,8 +305,9 @@ function wechatPage({ title, mode, secret, token, selectedContact, message }) {
     .entryText{white-space:pre-wrap;overflow-wrap:anywhere;color:#f5f6f7;line-height:1.55;font-size:17px}
     .empty{margin:auto;color:var(--muted);text-align:center;padding:34px 0;font-size:17px}
     .composer{position:fixed;left:0;right:0;bottom:0;z-index:4;border-top:1px solid var(--line);background:#202327;padding:12px 14px calc(12px + env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr 78px;gap:10px}
-    textarea{width:100%;height:68px;resize:none;border:1px solid var(--line);border-radius:8px;outline:none;background:#2a2d31;color:var(--text);font:18px/1.45 inherit;padding:10px 12px}
-    button.send{height:68px;border:0;border-radius:8px;background:var(--green);color:#03150a;font-weight:800;font-size:18px}
+    textarea{width:100%;height:76px;resize:none;border:1px solid var(--line);border-radius:8px;outline:none;background:#2a2d31;color:var(--text);font:22px/1.4 inherit;padding:11px 12px}
+    textarea::placeholder,.search input::placeholder{color:#c2c8cd;font-size:20px;opacity:.82}
+    button.send{height:76px;border:0;border-radius:8px;background:var(--green);color:#03150a;font-weight:800;font-size:18px}
     button.send:disabled{opacity:.55}
     .status{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#000d;color:#fff;padding:10px 14px;border-radius:999px;font-size:15px;display:none;max-width:calc(100vw - 28px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     @media(min-width:760px){
@@ -317,7 +318,7 @@ function wechatPage({ title, mode, secret, token, selectedContact, message }) {
       .contacts{max-height:none;overflow:auto;border-bottom:0;border-right:1px solid var(--line)}
       .contact{grid-template-columns:38px minmax(0,1fr);padding:10px}.avatar{width:38px;height:38px;font-size:15px}.contactText strong{font-size:15px}.contactText small{font-size:12px}
       .log{overflow:auto;padding-bottom:12px}.entryText{font-size:15px}.empty{font-size:15px}
-      .composer{position:static;grid-template-columns:1fr 86px;padding:12px 14px}.composer textarea{height:58px;font-size:16px}button.send{height:58px;font-size:16px}
+      .composer{position:static;grid-template-columns:1fr 86px;padding:12px 14px}.composer textarea{height:58px;font-size:16px}.composer textarea::placeholder,.search input::placeholder{font-size:16px}button.send{height:58px;font-size:16px}
       .status{bottom:28px;font-size:13px}
     }
   </style>

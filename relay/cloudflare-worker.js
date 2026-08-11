@@ -285,13 +285,13 @@ function wechatPage({ title, mode, secret, token, selectedContact, message }) {
   <style>
     :root{color-scheme:dark;--bg:#101214;--side:#202327;--main:#1b1d20;--line:#33383d;--text:#f4f5f6;--muted:#a9b0b6;--green:#07c160;--bubble:#12b969}
     *{box-sizing:border-box}
-    html,body{width:100%;max-width:100%;overflow-x:hidden}
+    html,body{width:100%;max-width:100%;overflow-x:hidden;-webkit-text-size-adjust:100%;text-size-adjust:100%}
     body{margin:0;min-height:100vh;background:var(--main);color:var(--text);font:18px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
     .app{width:100%;max-width:100%;min-height:100svh;display:grid;grid-template-rows:auto minmax(0,1fr) auto;background:var(--main);overflow-x:hidden}
     .top{position:sticky;top:0;z-index:3;background:#202327;border-bottom:1px solid var(--line);padding:calc(12px + env(safe-area-inset-top)) 14px 12px}
     .title{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;margin-bottom:10px}
     .title strong{font-size:21px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.title span{color:var(--muted);font-size:14px}
-    .search input{width:100%;height:48px;border:0;border-radius:8px;background:#2d3035;color:var(--text);outline:none;padding:0 14px;font:20px inherit}
+    .search input{width:100%;height:48px;border:0;border-radius:8px;background:#2d3035;color:var(--text);outline:none;padding:0 14px;font-family:inherit;font-size:20px;line-height:1.35}
     .content{min-height:0;overflow:auto;padding-bottom:146px}
     .contacts{display:grid;grid-template-columns:1fr;gap:8px;max-height:36svh;overflow:auto;padding:12px 14px;background:#202327;border-bottom:1px solid var(--line)}
     .contact{width:100%;min-width:0;border:1px solid #3a4046;background:#2a2d31;color:var(--text);display:grid;grid-template-columns:42px minmax(0,1fr);gap:10px;align-items:center;text-align:left;padding:10px 12px;border-radius:8px;cursor:pointer}
@@ -305,12 +305,12 @@ function wechatPage({ title, mode, secret, token, selectedContact, message }) {
     .entryText{white-space:pre-wrap;overflow-wrap:anywhere;color:#f5f6f7;line-height:1.55;font-size:17px}
     .empty{margin:auto;color:var(--muted);text-align:center;padding:34px 0;font-size:17px}
     .composer{position:fixed;left:0;right:0;bottom:0;z-index:4;border-top:1px solid var(--line);background:#202327;padding:12px 14px calc(12px + env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr 78px;gap:10px}
-    textarea{width:100%;height:76px;resize:none;border:1px solid var(--line);border-radius:8px;outline:none;background:#2a2d31;color:var(--text);font:22px/1.4 inherit;padding:11px 12px}
+    textarea{width:100%;height:76px;resize:none;border:1px solid var(--line);border-radius:8px;outline:none;background:#2a2d31;color:var(--text);font-family:inherit;font-size:22px;line-height:1.4;padding:11px 12px}
     textarea::placeholder,.search input::placeholder{color:#c2c8cd;font-size:20px;opacity:.82}
     button.send{height:76px;border:0;border-radius:8px;background:var(--green);color:#03150a;font-weight:800;font-size:18px}
     button.send:disabled{opacity:.55}
     .status{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#000d;color:#fff;padding:10px 14px;border-radius:999px;font-size:15px;display:none;max-width:calc(100vw - 28px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    @media(min-width:760px){
+    @media(min-width:900px){
       body{display:grid;place-items:center;background:#0d0f11;font-size:16px}
       .app{width:min(920px,calc(100vw - 32px));height:min(780px,calc(100vh - 32px));min-height:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 24px 70px #0008;grid-template-rows:auto minmax(0,1fr) auto}
       .top{padding:12px 14px}.title strong{font-size:18px}.title span{font-size:12px}.search input{height:40px;font-size:16px}
@@ -479,8 +479,8 @@ function html(title, body, status = 200) {
     main{max-width:560px;margin:0 auto;padding:28px 18px}
     h1{font-size:24px;margin:0 0 14px}
     .message{padding:14px;border:1px solid #d5e4e1;background:#fff;border-radius:8px;line-height:1.5}
-    textarea{box-sizing:border-box;width:100%;min-height:150px;margin-top:14px;padding:12px;border:1px solid #c8d8d5;border-radius:8px;font:16px inherit}
-    button{width:100%;height:48px;margin-top:12px;border:0;border-radius:8px;background:#007670;color:#fff;font:600 16px inherit}
+    textarea{box-sizing:border-box;width:100%;min-height:150px;margin-top:14px;padding:12px;border:1px solid #c8d8d5;border-radius:8px;font-family:inherit;font-size:18px;line-height:1.45}
+    button{width:100%;height:48px;margin-top:12px;border:0;border-radius:8px;background:#007670;color:#fff;font-family:inherit;font-size:16px;font-weight:600}
     .hint{color:#60716e;line-height:1.55}
   </style>
 </head>

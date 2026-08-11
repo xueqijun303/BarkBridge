@@ -23,7 +23,8 @@ export class RelayRoom {
       if (this.queue.length > 0) {
         return Response.json({ replies: this.queue.splice(0, this.queue.length) });
       }
-      return this.waitForReply();
+      const waitMs = Math.max(0, Math.min(25000, Number(url.searchParams.get("waitMs") || 25000)));
+      return this.waitForReply(waitMs);
     }
     return new Response("Not found", { status: 404 });
   }
@@ -68,17 +69,18 @@ export class RelayRoom {
     return contacts;
   }
 
-  waitForReply() {
+  waitForReply(waitMs = 25000) {
+    if (waitMs <= 0) return Response.json({ replies: [] });
     return new Promise((resolve) => {
       const waiter = {
         resolve,
-        expiresAt: Date.now() + 25000,
+        expiresAt: Date.now() + waitMs,
       };
       waiter.timer = setTimeout(() => {
         const index = this.waiters.indexOf(waiter);
         if (index >= 0) this.waiters.splice(index, 1);
         resolve(Response.json({ replies: [] }));
-      }, 25000);
+      }, waitMs);
       this.waiters.push(waiter);
     });
   }
@@ -218,7 +220,11 @@ async function pollReplies(url, env) {
   }
 
   try {
-    return await relayStub(env).fetch("https://relay.local/dequeue");
+    const waitMs = url.searchParams.get("waitMs");
+    const target = waitMs === null
+      ? "https://relay.local/dequeue"
+      : `https://relay.local/dequeue?waitMs=${encodeURIComponent(waitMs)}`;
+    return await relayStub(env).fetch(target);
   } catch (error) {
     return workerError(error);
   }

@@ -2,12 +2,14 @@
 import argparse
 import datetime
 import html
+import http.client
 import http.server
 import json
 import os
 import shlex
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -20,9 +22,12 @@ HISTORY_PATH = os.path.expanduser("~/.barkbridge/local_history.json")
 CONTACT_RULES_PATH = os.path.expanduser("~/.barkbridge/contact_rules.json")
 PROCESSED_PATH = os.path.expanduser("~/.barkbridge/processed_replies.json")
 SEND_LOCK = threading.Lock()
+POLL_ERROR_LOG_EVERY_SECONDS = 60
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CLICK_HELPER_SOURCE = os.path.join(SCRIPT_DIR, "mac-click.swift")
 CLICK_HELPER_BIN = os.path.join(SCRIPT_DIR, "mac-click")
+OCR_HELPER_SOURCE = os.path.join(SCRIPT_DIR, "mac-ocr.swift")
+OCR_HELPER_BIN = os.path.join(SCRIPT_DIR, "mac-ocr")
 VISIBLE_CONTACTS = [
     "XQJ家庭群",
     "幸福一家人",
@@ -74,6 +79,8 @@ def main():
     parser = argparse.ArgumentParser(description="Poll BarkBridge relay and send replies through Mac WeChat.")
     parser.add_argument("--poll-url", required=True, help="Relay poll URL, including secret query string.")
     parser.add_argument("--interval", type=int, default=1, help="Delay after each poll in seconds.")
+    parser.add_argument("--poll-timeout", type=int, default=0, help="HTTP timeout for relay polling in seconds. 0 means auto-detect.")
+    parser.add_argument("--worker-wait-ms", type=int, default=-1, help="Worker long-poll wait time in milliseconds. -1 means auto-detect, 0 means immediate polling.")
     parser.add_argument("--receipt-url", default=os.environ.get("BARKBRIDGE_RECEIPT_URL", ""), help="Optional Bark endpoint URL for send receipts, for example https://api.day.app/key.")
     parser.add_argument("--max-retries", type=int, default=5, help="Maximum local retry attempts for failed sends.")
     parser.add_argument("--send-shortcut", choices=["enter", "cmd-enter", "both"], default="both", help="WeChat send shortcut to use after pasting the reply.")
@@ -87,14 +94,29 @@ def main():
     if not args.no_web:
         start_web_console(args)
 
+    configure_poll_mode(args)
+
+    last_poll_error = ""
+    last_poll_error_time = 0.0
+    poll_error_count = 0
     while True:
         try:
             pending = load_pending()
             if pending:
                 process_replies(pending, args)
             else:
-                replies = fetch_replies(args.poll_url)
+                replies = fetch_replies(args.poll_url, args.poll_timeout, args.worker_wait_ms)
                 process_replies(replies, args)
+            last_poll_error = ""
+            poll_error_count = 0
+        except PollNetworkError as exc:
+            poll_error_count += 1
+            now = time.time()
+            message = str(exc)
+            if message != last_poll_error or now - last_poll_error_time >= POLL_ERROR_LOG_EVERY_SECONDS:
+                print(f"poll warning ({poll_error_count}): {message}", file=sys.stderr, flush=True)
+                last_poll_error = message
+                last_poll_error_time = now
         except Exception as exc:
             print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
 
@@ -159,8 +181,9 @@ def make_web_handler(args):
                     print(f"web dry-run: {contact}: {text}", flush=True)
                 else:
                     with SEND_LOCK:
-                        send_wechat(rule["target"], text, args.send_shortcut)
-                    append_history(contact, text, "sent")
+                        result = send_wechat(rule["target"], text, args.send_shortcut, rule)
+                    append_history(contact, text, f"sent: {result['actual_title']}")
+                    send_receipt(args.receipt_url, "BarkBridge 已发送", format_receipt(contact, rule["target"], result["actual_title"], text))
                 self.send_json({"ok": True, "contacts": load_contacts(), "history": load_history()})
             except Exception as exc:
                 append_history(str(locals().get("contact") or ""), str(locals().get("text") or ""), f"failed: {type(exc).__name__}: {exc}")
@@ -585,17 +608,62 @@ def render_web_page():
 </html>"""
 
 
-def fetch_replies(poll_url):
-    request = urllib.request.Request(poll_url, headers={"User-Agent": "BarkBridge-MacRelay/1.0"})
+class PollNetworkError(RuntimeError):
+    pass
+
+
+def configure_poll_mode(args):
+    auto_wait = int(args.worker_wait_ms) < 0
+    auto_timeout = int(args.poll_timeout) <= 0
+    if auto_wait:
+        if worker_supports_wait_ms(args.poll_url):
+            args.worker_wait_ms = 8000
+            if auto_timeout:
+                args.poll_timeout = 12
+            print("poll: Worker supports waitMs, using short polling waitMs=8000 timeout=12", flush=True)
+        else:
+            args.worker_wait_ms = 25000
+            if auto_timeout:
+                args.poll_timeout = 35
+            print("poll: Worker waitMs not deployed yet, using legacy long polling waitMs=25000 timeout=35", flush=True)
+    elif auto_timeout:
+        args.poll_timeout = max(5, int(args.worker_wait_ms / 1000) + 10)
+
+
+def worker_supports_wait_ms(poll_url):
+    request = urllib.request.Request(with_query_param(poll_url, "waitMs", "0"), headers={"User-Agent": "BarkBridge-MacRelay/1.0"})
+    start = time.time()
     try:
-        with urllib.request.urlopen(request, timeout=35) as response:
+        with urllib.request.urlopen(request, timeout=6) as response:
+            json.loads(response.read().decode("utf-8"))
+        return time.time() - start < 5
+    except Exception as exc:
+        print(f"poll: waitMs probe failed, keeping legacy mode: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        return False
+
+
+def fetch_replies(poll_url, timeout_seconds=35, worker_wait_ms=25000):
+    url = with_query_param(poll_url, "waitMs", str(max(0, int(worker_wait_ms))))
+    request = urllib.request.Request(url, headers={"User-Agent": "BarkBridge-MacRelay/1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=max(3, int(timeout_seconds))) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"HTTP {exc.code}: {body[:300]}") from exc
+    except (urllib.error.URLError, TimeoutError, http.client.RemoteDisconnected, ConnectionError) as exc:
+        raise PollNetworkError(f"{type(exc).__name__}: {exc}") from exc
     if isinstance(payload, list):
         return payload
     return payload.get("replies") or []
+
+
+def with_query_param(url, key, value):
+    parsed = urllib.parse.urlparse(url)
+    pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    pairs = [(k, v) for k, v in pairs if k != key]
+    pairs.append((key, value))
+    return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(pairs)))
 
 
 def process_replies(replies, args):
@@ -625,9 +693,10 @@ def process_replies(replies, args):
             continue
         try:
             with SEND_LOCK:
-                send_wechat(rule["target"], text, args.send_shortcut)
+                result = send_wechat(rule["target"], text, args.send_shortcut, rule)
             remember_processed(rule["target"], text)
-            print(f"sent-action: {contact} -> {rule['target']}", flush=True)
+            print(f"sent-action: {contact} -> {rule['target']} ({result['actual_title']})", flush=True)
+            send_receipt(args.receipt_url, "BarkBridge 已发送", format_receipt(contact, rule["target"], result["actual_title"], text))
         except Exception as exc:
             normalized["attempts"] = attempts + 1
             normalized["last_error"] = f"{type(exc).__name__}: {exc}"
@@ -687,20 +756,35 @@ def resolve_contact_rule(contact):
         return {
             "target": target,
             "auto_send": auto_send,
+            "aliases": normalized_aliases(raw_rule),
+            "require_exact_title": raw_rule.get("require_exact_title", True) is not False,
             "reason": "未配置专用命令适配器，要求人工确认" if target in COMMAND_ADAPTER_TARGETS and not command_adapter_for(target, raw_rule) else ("联系人规则要求人工确认" if not auto_send else "联系人规则允许自动发送"),
         }
     if is_risky_contact_name(contact):
         return {
             "target": contact,
             "auto_send": False,
+            "aliases": [],
+            "require_exact_title": True,
             "reason": "联系人名称过短或不唯一，未配置规则",
         }
     auto_send = bool(data.get("default_auto_send"))
     return {
         "target": contact,
         "auto_send": auto_send,
+        "aliases": [],
+        "require_exact_title": True,
         "reason": "默认规则允许自动发送" if auto_send else "默认规则要求人工确认",
     }
+
+
+def normalized_aliases(rule):
+    aliases = rule.get("aliases", []) if isinstance(rule, dict) else []
+    if isinstance(aliases, str):
+        aliases = [aliases]
+    if not isinstance(aliases, list):
+        return []
+    return [str(alias).strip() for alias in aliases if str(alias).strip()]
 
 
 def is_risky_contact_name(contact):
@@ -788,14 +872,23 @@ def send_receipt(receipt_url, title, body):
         print(f"receipt error: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
 
 
-def send_wechat(contact, text, send_shortcut):
+def format_receipt(source_contact, target_contact, actual_title, text):
+    preview = text.replace("\n", " ").strip()
+    if len(preview) > 60:
+        preview = preview[:57] + "..."
+    return f"通知: {source_contact}\n目标: {target_contact}\n识别: {actual_title}\n内容: {preview}"
+
+
+def send_wechat(contact, text, send_shortcut, rule=None):
     if contact in COMMAND_ADAPTER_TARGETS:
         send_command_adapter(contact, text)
-        return
+        return {"actual_title": contact}
     bounds = get_wechat_window_bounds()
     select_contact_by_search(contact, bounds)
+    actual_title = verify_selected_chat(contact, text, bounds, rule or {})
     click_message_input(bounds)
     paste_and_send(text, send_shortcut)
+    return {"actual_title": actual_title}
 
 
 def command_adapter_for(contact, rule=None):
@@ -905,6 +998,12 @@ def ensure_click_helper():
     subprocess.run(["/usr/bin/swiftc", CLICK_HELPER_SOURCE, "-o", CLICK_HELPER_BIN], check=True, timeout=30)
 
 
+def ensure_ocr_helper():
+    if os.path.exists(OCR_HELPER_BIN) and os.path.getmtime(OCR_HELPER_BIN) >= os.path.getmtime(OCR_HELPER_SOURCE):
+        return
+    subprocess.run(["/usr/bin/swiftc", OCR_HELPER_SOURCE, "-o", OCR_HELPER_BIN], check=True, timeout=30)
+
+
 def click_at(x, y):
     ensure_click_helper()
     subprocess.run([CLICK_HELPER_BIN, str(int(x)), str(int(y))], check=True, timeout=5)
@@ -932,6 +1031,58 @@ end run
 '''
     subprocess.run([osascript_bin(), "-e", script, contact], check=True, timeout=10)
     time.sleep(0.9)
+
+
+def verify_selected_chat(expected_contact, text, bounds, rule):
+    require_exact_title = rule.get("require_exact_title", True) is not False
+    title = read_selected_chat_title(bounds)
+    candidates = [expected_contact] + list(rule.get("aliases") or [])
+    if title_matches(title, candidates):
+        return title
+    if not require_exact_title:
+        print(f"warn: chat title mismatch ignored: expected={expected_contact!r}, actual={title!r}", file=sys.stderr, flush=True)
+        return title or "未识别"
+    stage_manual_review(expected_contact, text, expected_contact)
+    expected = " / ".join(candidates)
+    raise RuntimeError(f"发送前校验失败，目标应为 [{expected}]，实际识别为 [{title or '未识别'}]，已拦截未发送")
+
+
+def read_selected_chat_title(bounds):
+    ensure_ocr_helper()
+    crop = {
+        "x": bounds["left"] + 215,
+        "y": bounds["top"] + 10,
+        "width": min(650, max(360, bounds["width"] - 520)),
+        "height": 40,
+    }
+    fd, path = tempfile.mkstemp(prefix="barkbridge-title-", suffix=".png")
+    os.close(fd)
+    try:
+        region = f"{int(crop['x'])},{int(crop['y'])},{int(crop['width'])},{int(crop['height'])}"
+        subprocess.run(["/usr/sbin/screencapture", "-x", "-R", region, path], check=True, timeout=5)
+        result = subprocess.run([OCR_HELPER_BIN, path], check=True, capture_output=True, text=True, timeout=15)
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        return " ".join(lines)
+    finally:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
+def title_matches(title, candidates):
+    normalized_title = normalize_match_text(title)
+    if not normalized_title:
+        return False
+    for candidate in candidates:
+        normalized_candidate = normalize_match_text(candidate)
+        if normalized_candidate and normalized_candidate in normalized_title:
+            return True
+    return False
+
+
+def normalize_match_text(value):
+    return "".join(ch for ch in str(value or "").strip().lower() if not ch.isspace())
 
 
 def click_message_input(bounds):

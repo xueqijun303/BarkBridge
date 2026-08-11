@@ -40,6 +40,16 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 
 ## 最新变化 / What's New
 
+### v1.3.4
+
+- Mac 微信自动发送前会通过本机 OCR 识别当前会话标题，只有识别结果匹配目标联系人/群聊时才会发送。
+- 如果目标校验失败，Mac relay 会拦截发送、复制人工确认内容，并通过 Bark 回执报告实际识别到的会话。
+- Cloudflare Worker 轮询支持 `waitMs` 参数；Mac relay 会自动探测线上 Worker 是否支持该参数，未部署新版 Worker 时自动使用兼容长轮询。
+
+- Before sending through Mac WeChat, the Mac relay now reads the current chat title with local OCR and sends only when it matches the target contact or group.
+- If target verification fails, the relay blocks the send, copies a manual-review payload, and reports the recognized chat through a Bark receipt.
+- Cloudflare Worker polling supports a `waitMs` parameter; the Mac relay auto-detects support and falls back to legacy long polling until the updated Worker is deployed.
+
 ### v1.3.3
 
 - Mac 远程回复默认开启，并内置当前 Cloudflare Worker 回复页地址。
@@ -274,14 +284,18 @@ The relay polling endpoint may return one object, an array, or an object with a 
 {"replies":[{"id":"reply-001","token":"token-from-bark-link","text":"收到，我稍后处理"}]}
 ```
 
-仓库内提供了一个 Cloudflare Worker 示例：`relay/cloudflare-worker.js`。部署时绑定一个 KV 命名空间到 `REPLIES`，可选设置环境变量 `REPLY_SECRET`。App 中这样配置：
+仓库内提供了一个 Cloudflare Worker 示例：`relay/cloudflare-worker.js`。部署时绑定 Durable Object：`RELAY` -> `RelayRoom`，可选设置环境变量 `REPLY_SECRET`。App 中这样配置：
 
-A Cloudflare Worker sample is included at `relay/cloudflare-worker.js`. Bind a KV namespace as `REPLIES`, and optionally set `REPLY_SECRET`. Configure the app like this:
+A Cloudflare Worker sample is included at `relay/cloudflare-worker.js`. Bind a Durable Object as `RELAY` -> `RelayRoom`, and optionally set `REPLY_SECRET`. Configure the app like this:
 
 ```text
 iPhone 回复页面 URL: https://your-worker.example.workers.dev/reply
 轮询取回复 URL: https://your-worker.example.workers.dev/poll?secret=your-secret
 ```
+
+新版 Worker 支持 `waitMs` 查询参数，例如 `/poll?secret=your-secret&waitMs=8000`。Mac relay 会自动探测该能力；如果线上 Worker 还没部署新版，它会继续使用 25 秒兼容长轮询，避免回复被发给已断开的请求。
+
+The updated Worker supports a `waitMs` query parameter, for example `/poll?secret=your-secret&waitMs=8000`. The Mac relay detects this automatically. If the deployed Worker has not been updated yet, it keeps using 25-second legacy long polling to avoid losing replies to a disconnected request.
 
 Mac 模式下，如果“Mac 回复白名单”留空，所有已正常推送到 Bark 的微信通知都会带回复链接。需要限制联系人时，再填写微信通知标题里显示的联系人名。
 
@@ -304,6 +318,18 @@ The Mac relay keeps a local retry queue for failed sends:
 ```text
 ~/.barkbridge/pending_replies.json
 ```
+
+自动发送白名单和目标校验规则保存在：
+
+Auto-send allowlist and target-verification rules are stored at:
+
+```text
+~/.barkbridge/contact_rules.json
+```
+
+每条规则可配置 `target`、`auto_send`、`aliases` 和 `require_exact_title`。默认要求 OCR 识别到的当前会话标题匹配 `target` 或 `aliases`，否则拦截发送。
+
+Each rule can define `target`, `auto_send`, `aliases`, and `require_exact_title`. By default, the OCR-recognized current chat title must match `target` or one of `aliases`; otherwise the send is blocked.
 
 如果要让 Mac 发送成功或失败后再推一条 Bark 回执，可以传入完整 Bark endpoint：
 

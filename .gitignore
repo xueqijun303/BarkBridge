@@ -4,5 +4,6 @@ app/build/
 local.properties
 *.iml
 .DS_Store
+.wrangler/
 tools/mac-click
 tools/mac-ocr

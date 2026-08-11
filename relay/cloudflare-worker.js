@@ -118,8 +118,11 @@ const DEFAULT_CONTACTS = [
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (request.method === "HEAD" && ["/reply", "/compose"].includes(url.pathname)) {
+    if (request.method === "HEAD" && ["/", "/reply", "/compose"].includes(url.pathname)) {
       return new Response(null, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+    }
+    if (url.pathname === "/" && request.method === "GET") {
+      return homePage();
     }
     if (url.pathname === "/reply" && request.method === "GET") {
       return replyPage(url);
@@ -459,6 +462,19 @@ function errorPage(title, message) {
     400
   );
 }
+
+
+function homePage() {
+  return html(
+    "BarkBridge Relay",
+    `<main>
+      <h1>BarkBridge Relay</h1>
+      <p class="message">中继服务正在运行。主动发送页面需要带 secret 参数打开；Bark 通知里的回复链接会自动携带 token。</p>
+      <p class="hint">可用路径：<br>/compose?secret=你的密钥<br>/reply?token=通知令牌<br>/poll?secret=你的密钥&amp;waitMs=0</p>
+    </main>`
+  );
+}
+
 
 function workerError(error) {
   return Response.json({

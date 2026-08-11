@@ -45,10 +45,12 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - Mac 微信自动发送前会通过本机 OCR 识别当前会话标题，只有识别结果匹配目标联系人/群聊时才会发送。
 - 如果目标校验失败，Mac relay 会拦截发送、复制人工确认内容，并通过 Bark 回执报告实际识别到的会话。
 - Cloudflare Worker 轮询支持 `waitMs` 参数；Mac relay 会自动探测线上 Worker 是否支持该参数，未部署新版 Worker 时自动使用兼容长轮询。
+- iPhone 回复/主动发送页面改为移动端优先布局，联系人列表改为纵向选择，正文和输入框字体放大。
 
 - Before sending through Mac WeChat, the Mac relay now reads the current chat title with local OCR and sends only when it matches the target contact or group.
 - If target verification fails, the relay blocks the send, copies a manual-review payload, and reports the recognized chat through a Bark receipt.
 - Cloudflare Worker polling supports a `waitMs` parameter; the Mac relay auto-detects support and falls back to legacy long polling until the updated Worker is deployed.
+- The iPhone reply/compose page now uses a mobile-first layout with a vertical contact list and larger message/input text.
 
 ### v1.3.3
 

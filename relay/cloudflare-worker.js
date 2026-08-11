@@ -286,34 +286,39 @@ function wechatPage({ title, mode, secret, token, selectedContact, message }) {
     :root{color-scheme:dark;--bg:#101214;--side:#202327;--main:#1b1d20;--line:#33383d;--text:#f4f5f6;--muted:#a9b0b6;--green:#07c160;--bubble:#12b969}
     *{box-sizing:border-box}
     html,body{width:100%;max-width:100%;overflow-x:hidden}
-    body{margin:0;min-height:100vh;background:var(--main);color:var(--text);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-    .app{width:100%;max-width:100%;min-height:100svh;display:grid;grid-template-rows:auto auto 1fr auto;background:var(--main);overflow-x:hidden}
-    .top{position:sticky;top:0;z-index:3;background:#202327;border-bottom:1px solid var(--line);padding:10px 12px 8px}
-    .title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
-    .title strong{font-size:17px}.title span{color:var(--muted);font-size:12px}
-    .search input{width:100%;height:40px;border:0;border-radius:8px;background:#2d3035;color:var(--text);outline:none;padding:0 12px;font:16px inherit}
-    .contacts{display:flex;gap:8px;overflow-x:auto;padding:10px 12px;background:#202327;border-bottom:1px solid var(--line);scrollbar-width:none}
-    .contacts::-webkit-scrollbar{display:none}
-    .contact{border:1px solid #3a4046;background:#2a2d31;color:var(--text);display:flex;gap:7px;align-items:center;text-align:left;padding:8px 10px;border-radius:999px;cursor:pointer;white-space:nowrap;max-width:190px}
+    body{margin:0;min-height:100vh;background:var(--main);color:var(--text);font:18px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .app{width:100%;max-width:100%;min-height:100svh;display:grid;grid-template-rows:auto minmax(0,1fr) auto;background:var(--main);overflow-x:hidden}
+    .top{position:sticky;top:0;z-index:3;background:#202327;border-bottom:1px solid var(--line);padding:calc(12px + env(safe-area-inset-top)) 14px 12px}
+    .title{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;margin-bottom:10px}
+    .title strong{font-size:21px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.title span{color:var(--muted);font-size:14px}
+    .search input{width:100%;height:46px;border:0;border-radius:8px;background:#2d3035;color:var(--text);outline:none;padding:0 14px;font:18px inherit}
+    .content{min-height:0;overflow:auto;padding-bottom:146px}
+    .contacts{display:grid;grid-template-columns:1fr;gap:8px;max-height:36svh;overflow:auto;padding:12px 14px;background:#202327;border-bottom:1px solid var(--line)}
+    .contact{width:100%;min-width:0;border:1px solid #3a4046;background:#2a2d31;color:var(--text);display:grid;grid-template-columns:42px minmax(0,1fr);gap:10px;align-items:center;text-align:left;padding:10px 12px;border-radius:8px;cursor:pointer}
     .contact.active{background:#13a765;border-color:#13a765;color:#03150a}.contact:hover{background:#333940}
-    .avatar{width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#536dfe,#10c77a);display:grid;place-items:center;font-size:12px;font-weight:800;flex:0 0 auto;color:#fff}
-    .contactText{min-width:0}.contactText strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.contactText small{display:none}
-    .log{overflow:auto;padding:12px 12px 118px;display:flex;flex-direction:column;gap:9px}
-    .entry{border:1px solid var(--line);background:#24272b;border-radius:8px;padding:10px 11px}
+    .avatar{width:42px;height:42px;border-radius:8px;background:linear-gradient(135deg,#536dfe,#10c77a);display:grid;place-items:center;font-size:17px;font-weight:800;flex:0 0 auto;color:#fff}
+    .contactText{min-width:0}.contactText strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:18px;line-height:1.25}.contactText small{display:block;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:inherit;opacity:.68}
+    .log{padding:14px;display:flex;flex-direction:column;gap:10px}
+    .entry{border:1px solid var(--line);background:#24272b;border-radius:8px;padding:12px}
     .entryTop{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
-    .entryTop strong{font-size:14px;color:#eaf7f0}.entryTop time{color:var(--muted);font-size:12px;white-space:nowrap}
-    .entryText{white-space:pre-wrap;overflow-wrap:anywhere;color:#f5f6f7;line-height:1.5}
-    .empty{margin:auto;color:var(--muted);text-align:center;padding:30px 0}
-    .composer{position:fixed;left:0;right:0;bottom:0;z-index:4;border-top:1px solid var(--line);background:#202327;padding:10px 12px calc(10px + env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr 72px;gap:8px}
-    textarea{width:100%;height:52px;resize:none;border:1px solid var(--line);border-radius:8px;outline:none;background:#2a2d31;color:var(--text);font:16px/1.4 inherit;padding:8px 10px}
-    button.send{height:52px;border:0;border-radius:8px;background:var(--green);color:#03150a;font-weight:800;font-size:15px}
+    .entryTop strong{font-size:16px;color:#eaf7f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.entryTop time{color:var(--muted);font-size:13px;white-space:nowrap}
+    .entryText{white-space:pre-wrap;overflow-wrap:anywhere;color:#f5f6f7;line-height:1.55;font-size:17px}
+    .empty{margin:auto;color:var(--muted);text-align:center;padding:34px 0;font-size:17px}
+    .composer{position:fixed;left:0;right:0;bottom:0;z-index:4;border-top:1px solid var(--line);background:#202327;padding:12px 14px calc(12px + env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr 78px;gap:10px}
+    textarea{width:100%;height:68px;resize:none;border:1px solid var(--line);border-radius:8px;outline:none;background:#2a2d31;color:var(--text);font:18px/1.45 inherit;padding:10px 12px}
+    button.send{height:68px;border:0;border-radius:8px;background:var(--green);color:#03150a;font-weight:800;font-size:18px}
     button.send:disabled{opacity:.55}
-    .status{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#000b;color:#fff;padding:8px 12px;border-radius:999px;font-size:13px;display:none}
+    .status{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#000d;color:#fff;padding:10px 14px;border-radius:999px;font-size:15px;display:none;max-width:calc(100vw - 28px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     @media(min-width:760px){
-      body{display:grid;place-items:center;background:#0d0f11}
-      .app{width:min(860px,calc(100vw - 32px));height:min(780px,calc(100vh - 32px));min-height:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 24px 70px #0008}
-      .composer{position:static}
-      .log{padding-bottom:12px}
+      body{display:grid;place-items:center;background:#0d0f11;font-size:16px}
+      .app{width:min(920px,calc(100vw - 32px));height:min(780px,calc(100vh - 32px));min-height:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 24px 70px #0008;grid-template-rows:auto minmax(0,1fr) auto}
+      .top{padding:12px 14px}.title strong{font-size:18px}.title span{font-size:12px}.search input{height:40px;font-size:16px}
+      .content{display:grid;grid-template-columns:300px minmax(0,1fr);min-height:0;overflow:hidden;padding-bottom:0}
+      .contacts{max-height:none;overflow:auto;border-bottom:0;border-right:1px solid var(--line)}
+      .contact{grid-template-columns:38px minmax(0,1fr);padding:10px}.avatar{width:38px;height:38px;font-size:15px}.contactText strong{font-size:15px}.contactText small{font-size:12px}
+      .log{overflow:auto;padding-bottom:12px}.entryText{font-size:15px}.empty{font-size:15px}
+      .composer{position:static;grid-template-columns:1fr 86px;padding:12px 14px}.composer textarea{height:58px;font-size:16px}button.send{height:58px;font-size:16px}
+      .status{bottom:28px;font-size:13px}
     }
   </style>
 </head>
@@ -323,8 +328,10 @@ function wechatPage({ title, mode, secret, token, selectedContact, message }) {
       <div class="title"><strong id="title">${selectedContact || "选择联系人"}</strong><span>发送日志</span></div>
       <div class="search"><input id="addContact" placeholder="输入联系人后回车"></div>
     </header>
-    <nav class="contacts" id="contacts">${contactsHtml}</nav>
-    <main class="log" id="log"><div class="empty">正在读取发送日志</div></main>
+    <section class="content">
+      <nav class="contacts" id="contacts">${contactsHtml}</nav>
+      <main class="log" id="log"><div class="empty">正在读取发送日志</div></main>
+    </section>
     <form class="composer" id="form">
       <textarea id="text" name="text" placeholder="${mode === "reply" ? "输入回复内容" : "输入要发送的内容"}" required></textarea>
       <button class="send" id="send" type="submit">发送</button>

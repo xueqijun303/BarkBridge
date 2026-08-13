@@ -62,18 +62,17 @@ class NotifyService: NotificationListenerService() {
             AI.summary(full)
 
         val pushTitle = if (title.isBlank()) "微信消息" else "微信 - $title"
-        val replyUrl = RemoteReplyRegistry.capture(applicationContext, sbn, title, text)
+        val replyAllowed = RemoteReplyRegistry.capture(applicationContext, sbn, title, text) != null
         ConversationMirror.recordIncoming(applicationContext, title.ifBlank { "微信" }, text)
-        val chatUrl = ConversationMirror.chatUrl(applicationContext, title.ifBlank { "微信" })
-        if (replyUrl.isNullOrBlank()) {
-            if (chatUrl.isBlank()) {
-                Bark.send(applicationContext,key,pushTitle,msg)
-            } else {
-                Bark.send(applicationContext, key, pushTitle, "$msg\n\n点击通知查看完整会话\n$chatUrl", mapOf("url" to chatUrl))
-            }
+        val chatUrl = if (replyAllowed || !AppSettings.remoteReplyEnabled(applicationContext)) {
+            ConversationMirror.chatUrl(applicationContext, title.ifBlank { "微信" })
         } else {
-            val openUrl = chatUrl.ifBlank { replyUrl }
-            Bark.send(applicationContext, key, pushTitle, "$msg\n\n查看完整会话\n${openUrl}\n\n直接回复\n$replyUrl", mapOf("url" to openUrl))
+            ""
+        }
+        if (chatUrl.isBlank()) {
+            Bark.send(applicationContext,key,pushTitle,msg)
+        } else {
+            Bark.send(applicationContext, key, pushTitle, "$msg\n\n查看并回复\n$chatUrl", mapOf("url" to chatUrl))
         }
 
         val logText = if (AppSettings.saveMessageBody(applicationContext)) {

@@ -244,7 +244,7 @@ class MainActivity : Activity() {
         card.addView(input("Mac 回复白名单，留空则所有已推送微信都带回复链接", AppSettings.remoteReplyContacts(this)) {
             AppSettings.setRemoteReplyContacts(this, it)
         }.withTop(8))
-        card.addView(input("iPhone 回复页面 URL", AppSettings.remoteReplyPageUrl(this)) {
+        card.addView(input("统一聊天/回复页面 URL", AppSettings.remoteReplyPageUrl(this)) {
             AppSettings.setRemoteReplyPageUrl(this, it)
         }.withTop(8))
         card.addView(input("轮询取回复 URL，Mac 模式给电脑脚本使用", AppSettings.remoteReplyPollUrl(this)) {
@@ -259,7 +259,7 @@ class MainActivity : Activity() {
         card.addView(input("聊天记录上传 URL", AppSettings.conversationIngestUrl(this)) {
             AppSettings.setConversationIngestUrl(this, it)
         }.withTop(8))
-        card.addView(input("iPhone 聊天面板 URL", AppSettings.conversationChatPageUrl(this)) {
+        card.addView(input("iPhone 聊天面板 URL，建议与上方统一页面一致", AppSettings.conversationChatPageUrl(this)) {
             AppSettings.setConversationChatPageUrl(this, it)
         }.withTop(8))
         card.addView(input("聊天面板密钥 secret，可留空复用轮询 URL", AppSettings.conversationRelaySecret(this)) {
@@ -677,7 +677,7 @@ class MainActivity : Activity() {
     private fun appVersionName(): String {
         return try {
             val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
-            info.versionName ?: "1.3.8"
+            info.versionName ?: "1.3.9"
         } catch (e: Exception) {
             "1.3.8"
         }

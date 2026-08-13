@@ -46,10 +46,12 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 聊天面板上传结果会写入普通日志，不再依赖诊断模式，方便确认 Android 手机是否真的把收到的微信通知上传到 Worker。
 - 远程回复配置区新增“测试聊天面板上传”按钮，可从 Android 手机直接写入一条 `BarkBridge手机自测` 消息到聊天面板。
 - 新增自托管中继服务 `relay/self-hosted-relay.py`，可部署到自己的服务器，绕开 `workers.dev` 网络不稳定问题。
+- 默认中继地址已切换到阿里云自托管服务 `http://47.101.153.215:8787`。
 
 - Conversation-mirror upload results are now written to normal logs instead of diagnostic-only logs, making it easier to verify whether Android really uploads captured WeChat notifications to the Worker.
 - Added a "测试聊天面板上传" button in the remote-reply settings section; it writes a `BarkBridge手机自测` message from Android into the chat panel.
 - Added `relay/self-hosted-relay.py` for deploying the relay on your own server when `workers.dev` is unstable or blocked.
+- The default relay base URL now points to the Aliyun self-hosted service at `http://47.101.153.215:8787`.
 
 ### v1.3.6
 
@@ -352,8 +354,8 @@ App 中可配置：
 Configure these fields in the app:
 
 ```text
-聊天记录上传 URL: https://your-worker.example.workers.dev/ingest
-iPhone 聊天面板 URL: https://your-worker.example.workers.dev/chat
+聊天记录上传 URL: http://47.101.153.215:8787/ingest
+iPhone 聊天面板 URL: http://47.101.153.215:8787/chat
 聊天面板密钥 secret: your-secret
 ```
 
@@ -384,10 +386,10 @@ sudo BARKBRIDGE_RELAY_SECRET='your-secret' bash relay/install-self-hosted.sh
 Configure after deployment:
 
 ```text
-聊天记录上传 URL: http://your-server-ip:8787/ingest
-iPhone 聊天面板 URL: http://your-server-ip:8787/chat
+聊天记录上传 URL: http://47.101.153.215:8787/ingest
+iPhone 聊天面板 URL: http://47.101.153.215:8787/chat
 聊天面板密钥 secret: your-secret
-轮询取回复 URL: http://your-server-ip:8787/poll?secret=your-secret
+轮询取回复 URL: http://47.101.153.215:8787/poll?secret=your-secret
 ```
 
 如果服务器启用了防火墙或云安全组，需要放行 TCP `8787`。如果之后绑定域名和 HTTPS，只需要把上面的 `http://your-server-ip:8787` 换成新的 HTTPS 地址。

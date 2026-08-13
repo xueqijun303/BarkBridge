@@ -6,9 +6,9 @@ object AppSettings {
     private const val DEFAULT_SERVER = "https://api.day.app"
     private const val DEFAULT_BLOCK = "广告,拼多多,淘宝"
     private const val DEFAULT_IMPORTANT = "验证码,银行,转账,老板"
-    private const val DEFAULT_REPLY_PAGE = "https://barkbridge-relay.xueqijun303.workers.dev/reply"
-    private const val DEFAULT_CHAT_INGEST = "https://barkbridge-relay.xueqijun303.workers.dev/ingest"
-    private const val DEFAULT_CHAT_PAGE = "https://barkbridge-relay.xueqijun303.workers.dev/chat"
+    private const val DEFAULT_REPLY_PAGE = "http://47.101.153.215:8787/reply"
+    private const val DEFAULT_CHAT_INGEST = "http://47.101.153.215:8787/ingest"
+    private const val DEFAULT_CHAT_PAGE = "http://47.101.153.215:8787/chat"
 
     fun appEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "app_enabled", true)
     fun setAppEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "app_enabled", value)

@@ -1,4 +1,4 @@
-# BarkBridge v1.3.6
+# BarkBridge v1.3.7
 
 BarkBridge 是一款 Android 工具，可以把选定的微信通知和来电事件转发到 Bark。
 
@@ -40,6 +40,14 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 支持本地属性或 GitHub Secrets 发布签名 / Optional release signing through local properties or GitHub Secrets
 
 ## 最新变化 / What's New
+
+### v1.3.7
+
+- 聊天面板上传结果会写入普通日志，不再依赖诊断模式，方便确认 Android 手机是否真的把收到的微信通知上传到 Worker。
+- 远程回复配置区新增“测试聊天面板上传”按钮，可从 Android 手机直接写入一条 `BarkBridge手机自测` 消息到聊天面板。
+
+- Conversation-mirror upload results are now written to normal logs instead of diagnostic-only logs, making it easier to verify whether Android really uploads captured WeChat notifications to the Worker.
+- Added a "测试聊天面板上传" button in the remote-reply settings section; it writes a `BarkBridge手机自测` message from Android into the chat panel.
 
 ### v1.3.6
 
@@ -210,9 +218,9 @@ GitHub Actions 会生成以下 APK 产物名：
 GitHub Actions produces APK artifacts with these names:
 
 ```text
-BarkBridge_v1.3.6-debug.apk
-BarkBridge_v1.3.6-release.apk
-BarkBridge_v1.3.6-release-unsigned.apk
+BarkBridge_v1.3.7-debug.apk
+BarkBridge_v1.3.7-release.apk
+BarkBridge_v1.3.7-release-unsigned.apk
 ```
 
 Debug APK 可直接用于测试安装。未签名 release APK 需要签名后再公开分发；如果配置了签名 Secrets，Actions 会生成已签名 release APK。
@@ -248,9 +256,9 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## 息屏推送 / Screen-Off Delivery
 
-BarkBridge v1.3.6 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
+BarkBridge v1.3.7 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
 
-BarkBridge v1.3.6 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.3.7 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
 
 App 使用前台服务、通知监听重绑、唤醒锁、后台联网状态检测和失败补发队列，让 Bark 推送在息屏期间尽量保持可用。
 
@@ -486,6 +494,6 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-推送类似 `v1.3.6` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
+推送类似 `v1.3.7` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
 
-Pushing a tag such as `v1.3.6` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.3.7` builds APKs and publishes them to the GitHub Release page automatically.

@@ -35,14 +35,16 @@ object ConversationMirror {
                 conn.readTimeout = 10000
                 conn.doOutput = true
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                conn.setRequestProperty("User-Agent", "BarkBridge/1.3.6 Android")
+                conn.setRequestProperty("User-Agent", "BarkBridge/1.3.7 Android")
                 conn.outputStream.use { it.write(body) }
                 val code = conn.responseCode
                 if (code !in 200..299) {
-                    LogStore.add(ctx, "聊天面板上传失败: HTTP $code", diagnostic = true, category = "聊天")
+                    LogStore.add(ctx, "聊天面板上传失败: HTTP $code", category = "聊天")
+                } else {
+                    LogStore.add(ctx, "聊天面板已上传: $contact", category = "聊天")
                 }
             } catch (e: Exception) {
-                LogStore.add(ctx, "聊天面板上传失败: ${e.javaClass.simpleName} ${e.message.orEmpty()}".take(180), diagnostic = true, category = "聊天")
+                LogStore.add(ctx, "聊天面板上传失败: ${e.javaClass.simpleName} ${e.message.orEmpty()}".take(180), category = "聊天")
             } finally {
                 conn?.disconnect()
             }

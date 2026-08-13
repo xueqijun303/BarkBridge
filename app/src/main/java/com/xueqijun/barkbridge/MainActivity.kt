@@ -265,6 +265,17 @@ class MainActivity : Activity() {
         card.addView(input("聊天面板密钥 secret，可留空复用轮询 URL", AppSettings.conversationRelaySecret(this)) {
             AppSettings.setConversationRelaySecret(this, it)
         }.withTop(8))
+        card.addView(button("测试聊天面板上传").apply {
+            setOnClickListener {
+                ConversationMirror.recordIncoming(
+                    applicationContext,
+                    "BarkBridge手机自测",
+                    "这是一条从 Android 手机 BarkBridge 发出的聊天面板上传测试。"
+                )
+                toast("已请求上传，请稍后查看聊天日志和面板")
+                uiHandler.postDelayed({ refreshStatus() }, 1200)
+            }
+        }.withTop(10))
         return card
     }
 
@@ -666,9 +677,9 @@ class MainActivity : Activity() {
     private fun appVersionName(): String {
         return try {
             val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
-            info.versionName ?: "1.3.6"
+            info.versionName ?: "1.3.7"
         } catch (e: Exception) {
-            "1.3.6"
+            "1.3.7"
         }
     }
 

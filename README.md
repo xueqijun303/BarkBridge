@@ -40,6 +40,20 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 
 ## 最新变化 / What's New
 
+### v1.3.5
+
+- Mac 本地控制台升级为运维面板：显示轮询模式、最近轮询、待发队列、最近发送、OCR 识别标题和最近错误。
+- 新增 Mac relay 控制开关：暂停、允许自动发送、仅手动模式。
+- 新增联系人规则网页编辑：目标联系人、别名、自动发送、标题校验和备注。
+- 新增发送审计记录视图，并在连续失败 3 次后自动暂停对应联系人的自动发送。
+- Cloudflare Worker 新增 `/control?secret=...` 远程控制页，可从 iPhone 暂停/恢复 Mac relay、开关自动发送和仅手动模式。
+
+- The Mac local console is now an operations dashboard showing poll mode, last poll, pending queue, last send, OCR-recognized title, and latest error.
+- Added Mac relay controls: pause, auto-send master switch, and manual-only mode.
+- Added web editing for contact rules: target, aliases, auto-send, title verification, and notes.
+- Added an audit-log view, and auto-pauses a contact's auto-send after 3 consecutive failures.
+- The Cloudflare Worker now provides `/control?secret=...` for iPhone-side remote control of pause/resume, auto-send, and manual-only mode.
+
 ### v1.3.4
 
 - Mac 微信自动发送前会通过本机 OCR 识别当前会话标题，只有识别结果匹配目标联系人/群聊时才会发送。

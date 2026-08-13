@@ -118,7 +118,7 @@ const DEFAULT_CONTACTS = [
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (request.method === "HEAD" && ["/", "/reply", "/compose"].includes(url.pathname)) {
+    if (request.method === "HEAD" && ["/", "/reply", "/compose", "/control"].includes(url.pathname)) {
       return new Response(null, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
     }
     if (url.pathname === "/" && request.method === "GET") {
@@ -132,6 +132,12 @@ export default {
     }
     if (url.pathname === "/compose" && request.method === "GET") {
       return composePage(url, env);
+    }
+    if (url.pathname === "/control" && request.method === "GET") {
+      return controlPage(url, env);
+    }
+    if (url.pathname === "/control" && request.method === "POST") {
+      return saveControlCommand(request, env);
     }
     if (url.pathname === "/send" && request.method === "POST") {
       return saveManualMessage(request, env);
@@ -202,6 +208,36 @@ async function saveManualMessage(request, env) {
   }
 }
 
+
+async function saveControlCommand(request, env) {
+  try {
+    const contentType = request.headers.get("content-type") || "";
+    const data = contentType.includes("application/json")
+      ? await request.json()
+      : Object.fromEntries(await request.formData());
+    const secret = String(data.secret || "").trim();
+    const action = String(data.action || "").trim();
+    const rawValue = String(data.value || "").trim();
+    if (env.REPLY_SECRET && secret !== env.REPLY_SECRET) {
+      return Response.json({ ok: false, error: "密钥不正确" }, { status: 403 });
+    }
+    if (!["pause", "resume", "auto_send_on", "auto_send_off", "manual_only_on", "manual_only_off"].includes(action)) {
+      return Response.json({ ok: false, error: "未知控制指令" }, { status: 400 });
+    }
+    const value = rawValue === "true" || rawValue === "1" || rawValue === "on" || action.endsWith("_on") || action === "pause";
+    const id = `${Date.now()}-${crypto.randomUUID()}`;
+    await relayStub(env).fetch("https://relay.local/enqueue", {
+      method: "POST",
+      body: JSON.stringify({ id, token: "control", source: "control", action, value, text: `${action}=${value}`, createdAt: Date.now() }),
+      headers: { "content-type": "application/json" },
+    });
+    return Response.json({ ok: true });
+  } catch (error) {
+    return workerError(error);
+  }
+}
+
+
 async function contactsJson(url, env) {
   if (env.REPLY_SECRET && url.searchParams.get("secret") !== env.REPLY_SECRET) {
     return Response.json({ contacts: [] }, { status: 403 });
@@ -265,6 +301,33 @@ function composePage(url, env) {
     message: "",
   });
 }
+
+
+function controlPage(url, env) {
+  const secret = url.searchParams.get("secret") || "";
+  if (env.REPLY_SECRET && secret !== env.REPLY_SECRET) {
+    return errorPage("密钥不正确", "请使用带 secret 参数的 BarkBridge 控制页面。");
+  }
+  const safeSecret = escapeHtml(secret);
+  return html(
+    "BarkBridge Control",
+    `<main>
+      <h1>BarkBridge Control</h1>
+      <p class="message">这些指令会进入中转队列，由 Mac relay 下一次轮询后执行。</p>
+      <form class="control" method="post" action="/control">
+        <input type="hidden" name="secret" value="${safeSecret}">
+        <button name="action" value="pause">暂停 Mac relay</button>
+        <button name="action" value="resume">恢复 Mac relay</button>
+        <button name="action" value="auto_send_on">开启自动发送</button>
+        <button name="action" value="auto_send_off">关闭自动发送</button>
+        <button name="action" value="manual_only_on">开启仅手动模式</button>
+        <button name="action" value="manual_only_off">关闭仅手动模式</button>
+      </form>
+      <p class="hint">指令执行后，Mac 会通过 Bark 回执通知你。</p>
+    </main>`
+  );
+}
+
 
 function wechatPage({ title, mode, secret, token, selectedContact, message }) {
   const contacts = [...DEFAULT_CONTACTS];

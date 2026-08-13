@@ -21,8 +21,23 @@ CONTACTS_PATH = os.path.expanduser("~/.barkbridge/local_contacts.json")
 HISTORY_PATH = os.path.expanduser("~/.barkbridge/local_history.json")
 CONTACT_RULES_PATH = os.path.expanduser("~/.barkbridge/contact_rules.json")
 PROCESSED_PATH = os.path.expanduser("~/.barkbridge/processed_replies.json")
+CONTROL_PATH = os.path.expanduser("~/.barkbridge/control.json")
 SEND_LOCK = threading.Lock()
 POLL_ERROR_LOG_EVERY_SECONDS = 60
+FAILURE_PAUSE_THRESHOLD = 3
+CONTACT_FAILURES = {}
+RELAY_STATUS = {
+    "started_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    "worker_wait_ms": None,
+    "poll_timeout": None,
+    "poll_mode": "initializing",
+    "last_poll_at": "",
+    "last_reply_at": "",
+    "last_send_at": "",
+    "last_success": "",
+    "last_error": "",
+    "last_identified_title": "",
+}
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CLICK_HELPER_SOURCE = os.path.join(SCRIPT_DIR, "mac-click.swift")
 CLICK_HELPER_BIN = os.path.join(SCRIPT_DIR, "mac-click")
@@ -144,7 +159,10 @@ def make_web_handler(args):
                 self.send_text(render_web_page(), "text/html; charset=utf-8")
                 return
             if parsed.path == "/api/state":
-                self.send_json({"contacts": load_contacts(), "history": load_history()})
+                self.send_json(build_state())
+                return
+            if parsed.path == "/api/rules":
+                self.send_json(load_contact_rules())
                 return
             self.send_error(404)
 
@@ -159,6 +177,12 @@ def make_web_handler(args):
 
         def do_POST(self):
             parsed = urllib.parse.urlparse(self.path)
+            if parsed.path == "/api/control":
+                self.handle_control_post()
+                return
+            if parsed.path == "/api/rules":
+                self.handle_rules_post()
+                return
             if parsed.path != "/api/send":
                 self.send_error(404)
                 return
@@ -173,7 +197,13 @@ def make_web_handler(args):
                 add_contact(contact)
                 append_history(contact, text, "sending")
                 rule = resolve_contact_rule(contact)
-                if not rule["auto_send"]:
+                control = load_control()
+                if control["paused"] or control["manual_only"] or not control["auto_send_enabled"]:
+                    stage_manual_review(contact, text, rule["target"])
+                    reason = control_pause_reason(control)
+                    append_history(contact, text, f"manual-review: {reason}")
+                    send_receipt(args.receipt_url, "BarkBridge 未自动发送", f"{reason}，已复制内容，请在 Mac 微信手动确认: {contact} -> {rule['target']}")
+                elif not rule["auto_send"]:
                     stage_manual_review(contact, text, rule["target"])
                     append_history(contact, text, "manual-review")
                     send_receipt(args.receipt_url, "BarkBridge 未自动发送", f"{rule['reason']}，已复制内容，请在 Mac 微信手动确认: {contact} -> {rule['target']}")
@@ -183,11 +213,58 @@ def make_web_handler(args):
                     with SEND_LOCK:
                         result = send_wechat(rule["target"], text, args.send_shortcut, rule)
                     append_history(contact, text, f"sent: {result['actual_title']}")
+                    CONTACT_FAILURES.pop(rule["target"], None)
+                    update_status(last_reply_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), last_send_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), last_success=f"{contact} -> {rule['target']}", last_identified_title=result["actual_title"], last_error="")
                     send_receipt(args.receipt_url, "BarkBridge 已发送", format_receipt(contact, rule["target"], result["actual_title"], text))
                 self.send_json({"ok": True, "contacts": load_contacts(), "history": load_history()})
             except Exception as exc:
+                note_contact_failure(str(locals().get("contact") or ""))
+                update_status(last_error=f"{locals().get('contact') or ''}: {type(exc).__name__}: {exc}")
                 append_history(str(locals().get("contact") or ""), str(locals().get("text") or ""), f"failed: {type(exc).__name__}: {exc}")
                 self.send_json({"ok": False, "error": f"{type(exc).__name__}: {exc}", "history": load_history()}, status=500)
+
+        def handle_control_post(self):
+            try:
+                length = int(self.headers.get("Content-Length") or "0")
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                control = load_control()
+                for key in ["paused", "auto_send_enabled", "manual_only"]:
+                    if key in payload:
+                        control[key] = bool(payload.get(key))
+                if "note" in payload:
+                    control["note"] = str(payload.get("note") or "").strip()
+                save_control(control)
+                self.send_json({"ok": True, "control": control, "state": build_state()})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status=500)
+
+        def handle_rules_post(self):
+            try:
+                length = int(self.headers.get("Content-Length") or "0")
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                rules = load_contact_rules()
+                contact = str(payload.get("contact") or "").strip()
+                if not contact:
+                    self.send_json({"ok": False, "error": "联系人不能为空"}, status=400)
+                    return
+                rule = {
+                    "target": str(payload.get("target") or contact).strip() or contact,
+                    "auto_send": bool(payload.get("auto_send")),
+                    "require_exact_title": payload.get("require_exact_title", True) is not False,
+                }
+                aliases = payload.get("aliases", [])
+                if isinstance(aliases, str):
+                    aliases = [item.strip() for item in aliases.replace("，", ",").split(",")]
+                rule["aliases"] = [str(item).strip() for item in aliases if str(item).strip()]
+                note = str(payload.get("note") or "").strip()
+                if note:
+                    rule["note"] = note
+                rules.setdefault("rules", {})[contact] = rule
+                save_contact_rules(rules)
+                add_contact(contact)
+                self.send_json({"ok": True, "rules": rules, "state": build_state()})
+            except Exception as exc:
+                self.send_json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status=500)
 
         def send_json(self, data, status=200):
             body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -239,6 +316,97 @@ def add_contact(contact):
         save_contacts(contacts)
 
 
+def build_state():
+    control = load_control()
+    history = load_history()
+    return {
+        "contacts": load_contacts(),
+        "history": history,
+        "rules": load_contact_rules(),
+        "control": control,
+        "status": {
+            **RELAY_STATUS,
+            "pending_count": len(load_pending()),
+            "history_count": len(history),
+            "processed_count": len(load_processed()),
+            "failure_counts": CONTACT_FAILURES,
+        },
+    }
+
+
+def update_status(**values):
+    RELAY_STATUS.update({key: value for key, value in values.items() if value is not None})
+
+
+def default_control():
+    return {
+        "paused": False,
+        "auto_send_enabled": True,
+        "manual_only": False,
+        "note": "",
+    }
+
+
+def load_control():
+    try:
+        with open(CONTROL_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            raise ValueError("control root must be object")
+    except FileNotFoundError:
+        data = {}
+    except Exception as exc:
+        print(f"error: failed to load control: {exc}", file=sys.stderr, flush=True)
+        data = {}
+    control = default_control()
+    control.update({key: data.get(key, control[key]) for key in control})
+    return control
+
+
+def save_control(control):
+    os.makedirs(os.path.dirname(CONTROL_PATH), exist_ok=True)
+    normalized = default_control()
+    normalized.update({key: control.get(key, normalized[key]) for key in normalized})
+    with open(CONTROL_PATH, "w", encoding="utf-8") as fh:
+        json.dump(normalized, fh, ensure_ascii=False, indent=2)
+
+
+def control_pause_reason(control):
+    if control.get("paused"):
+        return "Mac relay 已暂停"
+    if control.get("manual_only"):
+        return "当前为仅手动模式"
+    if not control.get("auto_send_enabled", True):
+        return "自动发送总开关已关闭"
+    return "控制规则要求人工确认"
+
+
+def note_contact_failure(target):
+    target = str(target or "").strip()
+    if not target:
+        return
+    CONTACT_FAILURES[target] = CONTACT_FAILURES.get(target, 0) + 1
+    if CONTACT_FAILURES[target] < FAILURE_PAUSE_THRESHOLD:
+        return
+    rules = load_contact_rules()
+    raw_rules = rules.setdefault("rules", {})
+    matched_key = None
+    for key, rule in raw_rules.items():
+        if isinstance(rule, dict) and str(rule.get("target") or key).strip() == target:
+            matched_key = key
+            break
+    if not matched_key:
+        matched_key = target
+    rule = raw_rules.get(matched_key) if isinstance(raw_rules.get(matched_key), dict) else {"target": target}
+    rule["target"] = str(rule.get("target") or target).strip() or target
+    rule["auto_send"] = False
+    rule["require_exact_title"] = rule.get("require_exact_title", True) is not False
+    rule["note"] = f"连续失败 {CONTACT_FAILURES[target]} 次，已自动暂停自动发送"
+    raw_rules[matched_key] = rule
+    save_contact_rules(rules)
+    update_status(last_error=f"{target} 连续失败 {CONTACT_FAILURES[target]} 次，已自动暂停")
+
+
 def load_history():
     try:
         with open(HISTORY_PATH, "r", encoding="utf-8") as fh:
@@ -272,239 +440,142 @@ def render_web_page():
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>BarkBridge 本地发送</title>
+  <title>BarkBridge Mac 控制台</title>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #111315;
+      --bg: #101214;
       --panel: #1f2226;
-      --panel-2: #2a2d31;
+      --panel-2: #292d31;
       --line: #34383d;
       --text: #f4f5f6;
       --muted: #a8adb3;
       --green: #07c160;
-      --green-dark: #05a451;
-      --bubble-in: #303337;
-      --bubble-out: #12b969;
+      --red: #ff5f57;
+      --amber: #f2b84b;
     }
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: #0d0f11;
-      color: var(--text);
-      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      display: grid;
-      place-items: center;
-    }
-    .shell {
-      width: min(1120px, calc(100vw - 32px));
-      height: min(760px, calc(100vh - 32px));
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      overflow: hidden;
-      display: grid;
-      grid-template-columns: 320px 1fr;
-      box-shadow: 0 24px 80px rgb(0 0 0 / 0.45);
-    }
-    .sidebar {
-      background: #202327;
-      border-right: 1px solid var(--line);
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-    }
-    .search {
-      padding: 16px;
-      border-bottom: 1px solid var(--line);
-    }
-    .search input {
-      width: 100%;
-      height: 40px;
-      border: 0;
-      border-radius: 6px;
-      background: #2d3035;
-      color: var(--text);
-      outline: none;
-      padding: 0 12px;
-      font-size: 14px;
-    }
-    .contacts {
-      overflow: auto;
-      padding: 8px 0;
-    }
-    .contact {
-      width: 100%;
-      border: 0;
-      background: transparent;
-      color: var(--text);
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      text-align: left;
-      padding: 12px 16px;
-      cursor: pointer;
-    }
-    .contact:hover { background: #292d32; }
-    .contact.active { background: #12a864; }
-    .avatar {
-      width: 42px;
-      height: 42px;
-      border-radius: 6px;
-      background: linear-gradient(135deg, #4b6bfb, #10c77a);
-      display: grid;
-      place-items: center;
-      font-weight: 700;
-      flex: 0 0 auto;
-    }
-    .contact-name {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-size: 15px;
-    }
-    .main {
-      background: #1b1d20;
-      display: grid;
-      grid-template-rows: 64px 1fr 176px;
-      min-width: 0;
-    }
-    .topbar {
-      border-bottom: 1px solid var(--line);
-      display: flex;
-      align-items: center;
-      padding: 0 24px;
-      font-size: 18px;
-      font-weight: 600;
-    }
-    .messages {
-      overflow: auto;
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-    .empty {
-      margin: auto;
-      color: var(--muted);
-    }
-    .message {
-      max-width: 76%;
-      align-self: flex-end;
-      display: grid;
-      gap: 6px;
-    }
-    .bubble {
-      background: var(--bubble-out);
-      color: #06150c;
-      border-radius: 8px 8px 2px 8px;
-      padding: 10px 12px;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      font-size: 15px;
-    }
-    .meta {
-      color: var(--muted);
-      font-size: 12px;
-      text-align: right;
-    }
-    .composer {
-      border-top: 1px solid var(--line);
-      background: #202327;
-      display: grid;
-      grid-template-rows: 1fr 48px;
-      padding: 12px 16px 14px;
-      gap: 10px;
-    }
-    textarea {
-      width: 100%;
-      resize: none;
-      border: 0;
-      outline: none;
-      background: transparent;
-      color: var(--text);
-      font: inherit;
-      font-size: 15px;
-      line-height: 1.5;
-    }
-    .composer-bottom {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
-    .manual-contact {
-      width: 220px;
-      height: 36px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--panel-2);
-      color: var(--text);
-      outline: none;
-      padding: 0 10px;
-    }
-    .send {
-      height: 36px;
-      min-width: 96px;
-      border: 0;
-      border-radius: 6px;
-      background: var(--green);
-      color: #04150b;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    .send:disabled {
-      opacity: 0.55;
-      cursor: default;
-    }
-    .status { color: var(--muted); font-size: 13px; }
-    @media (max-width: 780px) {
-      .shell {
-        width: 100vw;
-        height: 100vh;
-        border-radius: 0;
-        grid-template-columns: 132px 1fr;
-      }
-      .contact { padding: 10px; }
-      .avatar { display: none; }
-      .manual-contact { width: 150px; }
+    body { margin: 0; min-height: 100vh; background: #0d0f11; color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .page { max-width: 1280px; margin: 0 auto; padding: 18px; display: grid; gap: 14px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    h1 { margin: 0; font-size: 22px; }
+    .subtle { color: var(--muted); font-size: 13px; }
+    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 14px; align-items: start; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .panel h2 { margin: 0; padding: 14px 16px; font-size: 15px; border-bottom: 1px solid var(--line); }
+    .panel-body { padding: 14px 16px; display: grid; gap: 12px; }
+    .status-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .metric { background: var(--panel-2); border-radius: 8px; padding: 10px; min-width: 0; }
+    .metric strong { display: block; font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .metric span { color: var(--muted); font-size: 12px; }
+    .switches { display: grid; gap: 8px; }
+    label.switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--panel-2); border-radius: 8px; padding: 10px 12px; }
+    input, textarea, select { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--text); outline: none; padding: 9px 10px; font: inherit; }
+    textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
+    button { border: 0; border-radius: 6px; background: var(--green); color: #04150b; font-weight: 800; height: 36px; padding: 0 14px; cursor: pointer; }
+    button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
+    button.danger { background: var(--red); color: #190505; }
+    .contacts { max-height: 360px; overflow: auto; display: grid; gap: 6px; }
+    .contact { width: 100%; min-width: 0; text-align: left; background: transparent; color: var(--text); border: 1px solid transparent; border-radius: 6px; padding: 9px 10px; display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+    .contact.active { background: #12a864; color: #03150a; }
+    .badge { font-size: 12px; color: var(--muted); }
+    .contact.active .badge { color: #073b1f; }
+    .tabs { display: flex; gap: 8px; padding: 10px; border-bottom: 1px solid var(--line); }
+    .tab { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
+    .tab.active { background: var(--green); color: #03150a; }
+    .view { display: none; }
+    .view.active { display: block; }
+    .history { max-height: 540px; overflow: auto; display: grid; gap: 8px; }
+    .event { background: var(--panel-2); border-radius: 8px; padding: 10px 12px; }
+    .event-top { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; color: var(--muted); font-size: 12px; }
+    .event-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .full { grid-column: 1 / -1; }
+    @media (max-width: 860px) {
+      .page { padding: 10px; }
+      .grid { grid-template-columns: 1fr; }
+      .status-grid, .form-grid { grid-template-columns: 1fr; }
+      header { align-items: flex-start; flex-direction: column; }
     }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <aside class="sidebar">
-      <div class="search"><input id="contactInput" placeholder="输入联系人并加入左侧"></div>
-      <div class="contacts" id="contacts"></div>
-    </aside>
-    <main class="main">
-      <div class="topbar" id="title">选择联系人</div>
-      <div class="messages" id="messages"><div class="empty">选择左侧联系人后发送消息</div></div>
-      <form class="composer" id="form">
-        <textarea id="text" placeholder="输入要通过 Mac 微信发送的内容"></textarea>
-        <div class="composer-bottom">
-          <input class="manual-contact" id="manualContact" placeholder="联系人">
-          <div class="status" id="status">本地连接中</div>
-          <button class="send" id="send" type="submit">发送</button>
+  <div class="page">
+    <header>
+      <div>
+        <h1>BarkBridge Mac 控制台</h1>
+        <div class="subtle" id="summary">正在连接本地 relay</div>
+      </div>
+      <button class="secondary" id="refreshBtn" type="button">刷新</button>
+    </header>
+
+    <section class="panel">
+      <h2>运行状态</h2>
+      <div class="panel-body">
+        <div class="status-grid" id="metrics"></div>
+        <div class="switches">
+          <label class="switch"><span>暂停 relay</span><input id="paused" type="checkbox"></label>
+          <label class="switch"><span>允许自动发送</span><input id="autoSendEnabled" type="checkbox"></label>
+          <label class="switch"><span>仅手动模式</span><input id="manualOnly" type="checkbox"></label>
         </div>
-      </form>
-    </main>
+      </div>
+    </section>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>联系人</h2>
+        <div class="panel-body">
+          <input id="contactSearch" placeholder="搜索或输入联系人">
+          <div class="contacts" id="contacts"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="tabs">
+          <button class="tab active" data-view="sendView" type="button">发送</button>
+          <button class="tab" data-view="ruleView" type="button">规则</button>
+          <button class="tab" data-view="historyView" type="button">审计</button>
+        </div>
+        <div class="panel-body">
+          <div class="view active" id="sendView">
+            <form id="sendForm" class="form-grid">
+              <input id="manualContact" placeholder="联系人">
+              <button type="submit">发送到 Mac 微信</button>
+              <textarea class="full" id="text" placeholder="输入要发送的内容"></textarea>
+              <div class="subtle full" id="sendStatus">选择联系人后发送</div>
+            </form>
+          </div>
+          <div class="view" id="ruleView">
+            <form id="ruleForm" class="form-grid">
+              <input id="ruleContact" placeholder="通知联系人">
+              <input id="ruleTarget" placeholder="Mac 微信目标">
+              <input id="ruleAliases" class="full" placeholder="别名，用逗号分隔">
+              <label class="switch full"><span>允许自动发送</span><input id="ruleAutoSend" type="checkbox"></label>
+              <label class="switch full"><span>要求标题精确校验</span><input id="ruleExactTitle" type="checkbox" checked></label>
+              <input id="ruleNote" class="full" placeholder="备注">
+              <button type="submit">保存规则</button>
+            </form>
+          </div>
+          <div class="view" id="historyView">
+            <div class="history" id="history"></div>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
   <script>
     let contacts = [];
     let history = [];
     let selected = "";
+    let state = {};
 
     const contactsEl = document.getElementById("contacts");
-    const titleEl = document.getElementById("title");
-    const messagesEl = document.getElementById("messages");
     const textEl = document.getElementById("text");
-    const statusEl = document.getElementById("status");
-    const sendEl = document.getElementById("send");
-    const contactInputEl = document.getElementById("contactInput");
+    const sendStatusEl = document.getElementById("sendStatus");
+    const contactSearchEl = document.getElementById("contactSearch");
     const manualContactEl = document.getElementById("manualContact");
+    const metricsEl = document.getElementById("metrics");
+    const historyEl = document.getElementById("history");
 
     function esc(value) {
       return String(value).replace(/[&<>"']/g, ch => ({
@@ -513,62 +584,115 @@ def render_web_page():
     }
 
     function renderContacts() {
-      contactsEl.innerHTML = contacts.map(contact => `
-        <button class="contact ${contact === selected ? "active" : ""}" data-contact="${esc(contact)}">
-          <div class="avatar">${esc(contact.slice(0, 1))}</div>
-          <div class="contact-name">${esc(contact)}</div>
+      const query = contactSearchEl.value.trim().toLowerCase();
+      const rules = (state.rules && state.rules.rules) || {};
+      const visible = contacts.filter(contact => !query || contact.toLowerCase().includes(query));
+      contactsEl.innerHTML = visible.map(contact => {
+        const rule = rules[contact] || {};
+        const badge = rule.auto_send ? "自动" : "手动";
+        return `
+        <button class="contact ${contact === selected ? "active" : ""}" data-contact="${esc(contact)}" type="button">
+          <span>${esc(contact)}</span><span class="badge">${badge}</span>
         </button>
-      `).join("");
+      `}).join("");
       contactsEl.querySelectorAll(".contact").forEach(button => {
         button.addEventListener("click", () => selectContact(button.dataset.contact));
       });
     }
 
-    function renderMessages() {
-      titleEl.textContent = selected || "选择联系人";
+    function renderStatus() {
+      const status = state.status || {};
+      const control = state.control || {};
+      document.getElementById("summary").textContent = control.paused ? "已暂停" : (control.manual_only ? "仅手动模式" : "运行中");
+      document.getElementById("paused").checked = !!control.paused;
+      document.getElementById("autoSendEnabled").checked = control.auto_send_enabled !== false;
+      document.getElementById("manualOnly").checked = !!control.manual_only;
+      const items = [
+        ["轮询模式", status.poll_mode || "-"],
+        ["待发队列", String(status.pending_count || 0)],
+        ["最近轮询", status.last_poll_at || "-"],
+        ["最近发送", status.last_success || "-"],
+        ["识别标题", status.last_identified_title || "-"],
+        ["最近错误", status.last_error || "-"],
+      ];
+      metricsEl.innerHTML = items.map(([label, value]) => `<div class="metric"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`).join("");
+    }
+
+    function renderSelected() {
       manualContactEl.value = selected;
-      const items = history.filter(item => item.contact === selected);
-      if (!selected || items.length === 0) {
-        messagesEl.innerHTML = `<div class="empty">${selected ? "还没有本地发送记录" : "选择左侧联系人后发送消息"}</div>`;
-        return;
-      }
-      messagesEl.innerHTML = items.map(item => `
-        <div class="message">
-          <div class="bubble">${esc(item.text)}</div>
-          <div class="meta">${esc(item.time)} · ${esc(item.status)}</div>
-        </div>
-      `).join("");
-      messagesEl.scrollTop = messagesEl.scrollHeight;
+      const rules = (state.rules && state.rules.rules) || {};
+      const rule = rules[selected] || {};
+      document.getElementById("ruleContact").value = selected || "";
+      document.getElementById("ruleTarget").value = rule.target || selected || "";
+      document.getElementById("ruleAliases").value = Array.isArray(rule.aliases) ? rule.aliases.join(", ") : "";
+      document.getElementById("ruleAutoSend").checked = !!rule.auto_send;
+      document.getElementById("ruleExactTitle").checked = rule.require_exact_title !== false;
+      document.getElementById("ruleNote").value = rule.note || "";
+      renderHistory();
+    }
+
+    function renderHistory() {
+      const items = selected ? history.filter(item => item.contact === selected) : history;
+      historyEl.innerHTML = (items.length ? items : history).slice().reverse().map(item => `
+        <article class="event">
+          <div class="event-top"><strong>${esc(item.contact || "未知")}</strong><span>${esc(item.time || "")} · ${esc(item.status || "")}</span></div>
+          <div class="event-text">${esc(item.text || "")}</div>
+        </article>
+      `).join("") || '<div class="subtle">暂无记录</div>';
     }
 
     function selectContact(contact) {
       selected = contact;
       renderContacts();
-      renderMessages();
+      renderSelected();
       textEl.focus();
     }
 
     async function refresh() {
       const response = await fetch("/api/state");
-      const data = await response.json();
-      contacts = data.contacts || [];
-      history = data.history || [];
+      state = await response.json();
+      contacts = state.contacts || [];
+      history = state.history || [];
       if (!selected && contacts.length) selected = contacts[0];
+      renderStatus();
       renderContacts();
-      renderMessages();
-      statusEl.textContent = "已连接本地 Mac relay";
+      renderSelected();
     }
 
-    document.getElementById("form").addEventListener("submit", async event => {
+    document.querySelectorAll(".tab").forEach(tab => tab.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === tab));
+      document.querySelectorAll(".view").forEach(view => view.classList.toggle("active", view.id === tab.dataset.view));
+    }));
+
+    async function updateControl(patch) {
+      const response = await fetch("/api/control", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(patch)});
+      const data = await response.json();
+      if (!data.ok) throw new Error(data.error || "控制更新失败");
+      await refresh();
+    }
+    document.getElementById("paused").addEventListener("change", event => updateControl({paused: event.target.checked}));
+    document.getElementById("autoSendEnabled").addEventListener("change", event => updateControl({auto_send_enabled: event.target.checked}));
+    document.getElementById("manualOnly").addEventListener("change", event => updateControl({manual_only: event.target.checked}));
+    document.getElementById("refreshBtn").addEventListener("click", refresh);
+    contactSearchEl.addEventListener("input", renderContacts);
+    contactSearchEl.addEventListener("keydown", event => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      const contact = contactSearchEl.value.trim();
+      if (!contact) return;
+      if (!contacts.includes(contact)) contacts.unshift(contact);
+      selectContact(contact);
+    });
+
+    document.getElementById("sendForm").addEventListener("submit", async event => {
       event.preventDefault();
       const contact = manualContactEl.value.trim() || selected;
       const text = textEl.value.trim();
       if (!contact || !text) {
-        statusEl.textContent = "联系人和内容不能为空";
+        sendStatusEl.textContent = "联系人和内容不能为空";
         return;
       }
-      sendEl.disabled = true;
-      statusEl.textContent = "正在调用 Mac 微信";
+      sendStatusEl.textContent = "正在调用 Mac 微信";
       try {
         const response = await fetch("/api/send", {
           method: "POST",
@@ -577,28 +701,33 @@ def render_web_page():
         });
         const data = await response.json();
         if (!data.ok) throw new Error(data.error || "发送失败");
-        contacts = data.contacts || contacts;
-        history = data.history || history;
         selected = contact;
         textEl.value = "";
-        renderContacts();
-        renderMessages();
-        statusEl.textContent = "已执行发送动作";
+        sendStatusEl.textContent = "已提交";
+        await refresh();
       } catch (error) {
-        statusEl.textContent = error.message;
-      } finally {
-        sendEl.disabled = false;
+        sendStatusEl.textContent = error.message;
       }
     });
 
-    contactInputEl.addEventListener("keydown", event => {
-      if (event.key !== "Enter") return;
+    document.getElementById("ruleForm").addEventListener("submit", async event => {
       event.preventDefault();
-      const contact = contactInputEl.value.trim();
-      if (!contact) return;
-      if (!contacts.includes(contact)) contacts.unshift(contact);
-      contactInputEl.value = "";
-      selectContact(contact);
+      const payload = {
+        contact: document.getElementById("ruleContact").value.trim(),
+        target: document.getElementById("ruleTarget").value.trim(),
+        aliases: document.getElementById("ruleAliases").value,
+        auto_send: document.getElementById("ruleAutoSend").checked,
+        require_exact_title: document.getElementById("ruleExactTitle").checked,
+        note: document.getElementById("ruleNote").value.trim(),
+      };
+      const response = await fetch("/api/rules", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+      const data = await response.json();
+      if (!data.ok) {
+        alert(data.error || "保存失败");
+        return;
+      }
+      selected = payload.contact;
+      await refresh();
     });
 
     refresh();
@@ -620,14 +749,17 @@ def configure_poll_mode(args):
             args.worker_wait_ms = 8000
             if auto_timeout:
                 args.poll_timeout = 12
+            update_status(worker_wait_ms=args.worker_wait_ms, poll_timeout=args.poll_timeout, poll_mode="short")
             print("poll: Worker supports waitMs, using short polling waitMs=8000 timeout=12", flush=True)
         else:
             args.worker_wait_ms = 25000
             if auto_timeout:
                 args.poll_timeout = 35
+            update_status(worker_wait_ms=args.worker_wait_ms, poll_timeout=args.poll_timeout, poll_mode="legacy")
             print("poll: Worker waitMs not deployed yet, using legacy long polling waitMs=25000 timeout=35", flush=True)
     elif auto_timeout:
         args.poll_timeout = max(5, int(args.worker_wait_ms / 1000) + 10)
+        update_status(worker_wait_ms=args.worker_wait_ms, poll_timeout=args.poll_timeout, poll_mode="manual")
 
 
 def worker_supports_wait_ms(poll_url):
@@ -643,6 +775,7 @@ def worker_supports_wait_ms(poll_url):
 
 
 def fetch_replies(poll_url, timeout_seconds=35, worker_wait_ms=25000):
+    update_status(last_poll_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     url = with_query_param(poll_url, "waitMs", str(max(0, int(worker_wait_ms))))
     request = urllib.request.Request(url, headers={"User-Agent": "BarkBridge-MacRelay/1.0"})
     try:
@@ -672,6 +805,9 @@ def process_replies(replies, args):
     remaining = []
     for reply in replies:
         normalized = normalize_reply(reply)
+        if normalized["source"] == "control" or normalized["action"]:
+            handle_remote_control(normalized, args)
+            continue
         contact = normalized["contact"]
         text = normalized["text"]
         attempts = normalized["attempts"]
@@ -683,6 +819,14 @@ def process_replies(replies, args):
             print(f"dry-run: {contact}: {text}", flush=True)
             continue
         rule = resolve_contact_rule(contact)
+        control = load_control()
+        if control["paused"] or control["manual_only"] or not control["auto_send_enabled"]:
+            stage_manual_review(contact, text, rule["target"])
+            reason = control_pause_reason(control)
+            append_history(contact, text, f"manual-review: {reason}")
+            print(f"manual-review: {contact} -> {rule['target']} ({reason})", flush=True)
+            send_receipt(args.receipt_url, "BarkBridge 未自动发送", f"{reason}，已复制内容: {contact} -> {rule['target']}")
+            continue
         if is_recently_processed(rule["target"], text):
             print(f"skip duplicate: {contact} -> {rule['target']}", flush=True)
             continue
@@ -695,11 +839,16 @@ def process_replies(replies, args):
             with SEND_LOCK:
                 result = send_wechat(rule["target"], text, args.send_shortcut, rule)
             remember_processed(rule["target"], text)
+            CONTACT_FAILURES.pop(rule["target"], None)
+            update_status(last_reply_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), last_send_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), last_success=f"{contact} -> {rule['target']}", last_identified_title=result["actual_title"], last_error="")
+            append_history(contact, text, f"sent: {result['actual_title']}")
             print(f"sent-action: {contact} -> {rule['target']} ({result['actual_title']})", flush=True)
             send_receipt(args.receipt_url, "BarkBridge 已发送", format_receipt(contact, rule["target"], result["actual_title"], text))
         except Exception as exc:
+            note_contact_failure(rule["target"])
             normalized["attempts"] = attempts + 1
             normalized["last_error"] = f"{type(exc).__name__}: {exc}"
+            update_status(last_error=f"{contact}: {normalized['last_error']}")
             if normalized["attempts"] <= args.max_retries:
                 remaining.append(normalized)
                 print(f"queued retry {normalized['attempts']}/{args.max_retries}: {contact}", file=sys.stderr, flush=True)
@@ -715,9 +864,39 @@ def normalize_reply(reply):
         "token": str(reply.get("token") or ""),
         "contact": str(reply.get("contact") or "").strip(),
         "text": str(reply.get("text") or "").strip(),
+        "source": str(reply.get("source") or "").strip(),
+        "action": str(reply.get("action") or "").strip(),
+        "value": reply.get("value"),
         "attempts": int(reply.get("attempts") or 0),
         "last_error": str(reply.get("last_error") or ""),
     }
+
+
+def handle_remote_control(command, args):
+    action = command["action"]
+    value = command["value"]
+    control = load_control()
+    if action == "pause":
+        control["paused"] = True
+    elif action == "resume":
+        control["paused"] = False
+    elif action == "auto_send_on":
+        control["auto_send_enabled"] = True
+    elif action == "auto_send_off":
+        control["auto_send_enabled"] = False
+    elif action == "manual_only_on":
+        control["manual_only"] = True
+    elif action == "manual_only_off":
+        control["manual_only"] = False
+    else:
+        print(f"skip unknown control action: {action}", file=sys.stderr, flush=True)
+        return
+    save_control(control)
+    text = f"远程控制已执行: {action}={value}"
+    append_history("BarkBridge 控制", text, "control")
+    update_status(last_success=text)
+    send_receipt(args.receipt_url, "BarkBridge 控制已执行", text)
+    print(f"control-action: {text}", flush=True)
 
 
 def ensure_contact_rules():
@@ -744,6 +923,16 @@ def load_contact_rules():
         return DEFAULT_CONTACT_RULES
 
 
+def save_contact_rules(rules):
+    os.makedirs(os.path.dirname(CONTACT_RULES_PATH), exist_ok=True)
+    if not isinstance(rules, dict):
+        raise ValueError("contact rules root must be an object")
+    if not isinstance(rules.get("rules"), dict):
+        rules["rules"] = {}
+    with open(CONTACT_RULES_PATH, "w", encoding="utf-8") as fh:
+        json.dump(rules, fh, ensure_ascii=False, indent=2)
+
+
 def resolve_contact_rule(contact):
     contact = str(contact or "").strip()
     data = load_contact_rules()
@@ -758,6 +947,8 @@ def resolve_contact_rule(contact):
             "auto_send": auto_send,
             "aliases": normalized_aliases(raw_rule),
             "require_exact_title": raw_rule.get("require_exact_title", True) is not False,
+            "note": str(raw_rule.get("note") or "").strip(),
+            "kind": str(raw_rule.get("kind") or infer_contact_kind(target)).strip(),
             "reason": "未配置专用命令适配器，要求人工确认" if target in COMMAND_ADAPTER_TARGETS and not command_adapter_for(target, raw_rule) else ("联系人规则要求人工确认" if not auto_send else "联系人规则允许自动发送"),
         }
     if is_risky_contact_name(contact):
@@ -766,6 +957,8 @@ def resolve_contact_rule(contact):
             "auto_send": False,
             "aliases": [],
             "require_exact_title": True,
+            "note": "",
+            "kind": infer_contact_kind(contact),
             "reason": "联系人名称过短或不唯一，未配置规则",
         }
     auto_send = bool(data.get("default_auto_send"))
@@ -774,8 +967,19 @@ def resolve_contact_rule(contact):
         "auto_send": auto_send,
         "aliases": [],
         "require_exact_title": True,
+        "note": "",
+        "kind": infer_contact_kind(contact),
         "reason": "默认规则允许自动发送" if auto_send else "默认规则要求人工确认",
     }
+
+
+def infer_contact_kind(contact):
+    contact = str(contact or "")
+    if contact in COMMAND_ADAPTER_TARGETS or "bot" in contact.lower():
+        return "special"
+    if "群" in contact or "、" in contact:
+        return "group"
+    return "person"
 
 
 def normalized_aliases(rule):

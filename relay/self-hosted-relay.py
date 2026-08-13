@@ -45,11 +45,30 @@ HIDDEN_CONTACTS = {
     "本地测试",
 }
 HIDDEN_CONTACT_PREFIXES = ("BarkBridge", "Codex", "阿里云部署测试", "本地测试")
+DEFAULT_CONFIG = {
+    "pinnedContacts": ["XQJ家庭群", "幸福一家人", "薛启军工作号"],
+    "hiddenContacts": sorted(HIDDEN_CONTACTS),
+}
 
 
 def is_hidden_contact(contact):
     name = (contact or "").strip()
     return bool(name and (name in HIDDEN_CONTACTS or name.startswith(HIDDEN_CONTACT_PREFIXES)))
+
+
+def normalize_contact_list(value):
+    if isinstance(value, str):
+        items = value.replace("\r", "\n").replace(",", "\n").replace("，", "\n").split("\n")
+    elif isinstance(value, list):
+        items = value
+    else:
+        items = []
+    normalized = []
+    for item in items:
+        contact = str(item or "").strip()
+        if contact and contact not in normalized:
+            normalized.append(contact)
+    return normalized
 
 
 class RelayStore:
@@ -91,6 +110,14 @@ class RelayStore:
                     direction text not null default '',
                     status text not null default '',
                     created_at integer not null
+                )
+                """
+            )
+            db.execute(
+                """
+                create table if not exists config (
+                    key text primary key,
+                    value text not null default ''
                 )
                 """
             )
@@ -201,14 +228,43 @@ class RelayStore:
             for row in rows
         ]
 
+    def config(self):
+        with self.connect() as db:
+            rows = db.execute("select key, value from config").fetchall()
+        values = dict(DEFAULT_CONFIG)
+        for key, value in rows:
+            try:
+                parsed = json.loads(value)
+            except Exception:
+                parsed = value
+            if key in values:
+                values[key] = parsed
+        values["pinnedContacts"] = normalize_contact_list(values.get("pinnedContacts"))
+        values["hiddenContacts"] = normalize_contact_list(values.get("hiddenContacts"))
+        return values
+
+    def save_config(self, data):
+        values = {
+            "pinnedContacts": normalize_contact_list(data.get("pinnedContacts")),
+            "hiddenContacts": normalize_contact_list(data.get("hiddenContacts")),
+        }
+        with self.lock, self.connect() as db:
+            db.executemany(
+                "insert or replace into config (key, value) values (?, ?)",
+                [(key, json.dumps(value, ensure_ascii=False)) for key, value in values.items()],
+            )
+        return self.config()
+
     def contacts(self):
+        config = self.config()
+        hidden = set(config.get("hiddenContacts", []))
         with self.connect() as db:
             rows = db.execute(
                 "select distinct contact from history where contact <> '' order by created_at desc limit 80"
             ).fetchall()
-        contacts = [row[0] for row in rows if row[0] and not is_hidden_contact(row[0])]
-        for contact in DEFAULT_CONTACTS:
-            if contact not in contacts and not is_hidden_contact(contact):
+        contacts = []
+        for contact in config.get("pinnedContacts", []) + [row[0] for row in rows] + DEFAULT_CONTACTS:
+            if contact and contact not in contacts and contact not in hidden and not is_hidden_contact(contact):
                 contacts.append(contact)
         return contacts
 
@@ -249,9 +305,10 @@ class RelayHandler(BaseHTTPRequestHandler):
     server_version = "BarkBridgeRelay/1.0"
 
     def do_HEAD(self):
-        if self.path_only() in {"/", "/reply", "/compose", "/control", "/chat"}:
+        if self.path_only() in {"/", "/reply", "/compose", "/control", "/chat", "/settings", "/health"}:
             self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+            content_type = "application/json; charset=utf-8" if self.path_only() == "/health" else "text/html; charset=utf-8"
+            self.send_header("Content-Type", content_type)
             self.end_headers()
         else:
             self.send_error(404)
@@ -259,7 +316,9 @@ class RelayHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path_only()
         query = self.query()
-        if path == "/":
+        if path == "/health":
+            self.json({"ok": True, "time": now_ms()})
+        elif path == "/":
             self.html(home_page())
         elif path == "/reply":
             self.html(reply_page(query))
@@ -273,6 +332,11 @@ class RelayHandler(BaseHTTPRequestHandler):
                 self.html(error_page("密钥不正确", "请使用带 secret 参数的 BarkBridge 控制页面。"), 403)
             else:
                 self.html(control_page(query.get("secret", [""])[0]))
+        elif path == "/settings":
+            if not self.allowed(query.get("secret", [""])[0]):
+                self.html(error_page("密钥不正确", "请使用带 secret 参数的 BarkBridge 设置页面。"), 403)
+            else:
+                self.html(settings_page(query.get("secret", [""])[0]))
         elif path == "/chat":
             if not self.allowed(query.get("secret", [""])[0]):
                 self.html(error_page("密钥不正确", "请使用带 secret 参数的 BarkBridge 聊天面板。"), 403)
@@ -298,7 +362,12 @@ class RelayHandler(BaseHTTPRequestHandler):
             if not self.allowed(query.get("secret", [""])[0]):
                 self.json({"contacts": []}, 403)
             else:
-                self.json({"contacts": self.server.store.contacts()})
+                self.json({"contacts": self.server.store.contacts(), "config": self.server.store.config()})
+        elif path == "/api/config":
+            if not self.allowed(query.get("secret", [""])[0]):
+                self.json({"config": {}}, 403)
+            else:
+                self.json({"config": self.server.store.config(), "contacts": self.server.store.contacts()})
         elif path == "/poll":
             if not self.allowed(query.get("secret", [""])[0]):
                 self.json({"replies": []}, 403)
@@ -319,6 +388,8 @@ class RelayHandler(BaseHTTPRequestHandler):
             self.save_manual()
         elif path == "/control":
             self.save_control()
+        elif path == "/api/config":
+            self.save_config()
         else:
             self.send_error(404)
 
@@ -396,6 +467,14 @@ class RelayHandler(BaseHTTPRequestHandler):
         }
         self.server.store.enqueue(item)
         self.json({"ok": True})
+
+    def save_config(self):
+        data = self.read_json_or_form()
+        if not self.allowed(str(data.get("secret", ""))):
+            self.json({"ok": False, "error": "密钥不正确"}, 403)
+            return
+        config = self.server.store.save_config(data)
+        self.json({"ok": True, "config": config, "contacts": self.server.store.contacts()})
 
     def enqueue(self, contact, text, source, token):
         item = {
@@ -479,12 +558,16 @@ def home_page():
     return simple_page(
         "BarkBridge Relay",
         "BarkBridge Relay",
-        "中继服务正在运行。可用路径：/chat?secret=你的密钥 /compose?secret=你的密钥 /control?secret=你的密钥 /poll?secret=你的密钥&waitMs=0",
+        "中继服务正在运行。可用路径：/chat?secret=你的密钥 /settings?secret=你的密钥 /control?secret=你的密钥 /poll?secret=你的密钥&waitMs=0",
     )
 
 
 def control_page(secret):
     return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BarkBridge Control</title><style>{BASE_CSS}</style></head><body><main><h1>BarkBridge Control</h1><p class="message">这些指令会进入中转队列，由 Mac relay 下一次轮询后执行。</p><form method="post" action="/control"><input type="hidden" name="secret" value="{esc(secret)}"><button name="action" value="pause">暂停 Mac relay</button><button name="action" value="resume">恢复 Mac relay</button><button name="action" value="auto_send_on">开启自动发送</button><button name="action" value="auto_send_off">关闭自动发送</button><button name="action" value="manual_only_on">开启仅手动模式</button><button name="action" value="manual_only_off">关闭仅手动模式</button></form></main></body></html>"""
+
+
+def settings_page(secret):
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Settings</title><style>{SETTINGS_CSS}</style></head><body><main><header><h1>BarkBridge 设置</h1><a href="/chat?secret={esc(secret)}">返回聊天</a></header><section><label>置顶联系人</label><textarea id="pinned" placeholder="每行一个联系人"></textarea></section><section><label>隐藏联系人</label><textarea id="hidden" placeholder="每行一个联系人"></textarea></section><button id="save">保存设置</button><p id="status"></p></main><script>const secret={json.dumps(secret)};{SETTINGS_JS}</script></body></html>"""
 
 
 def reply_page(query):
@@ -510,7 +593,7 @@ def compose_like_page(title, mode, secret, token, selected):
 
 
 def chat_page(secret, selected):
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Chat</title><style>{CHAT_CSS}</style></head><body><div class="app"><header><h1 id="title">BarkBridge Chat</h1><div class="hint">只显示 BarkBridge 启用后经手的完整消息</div></header><nav class="contacts" id="contacts"></nav><main class="messages" id="messages"></main><form id="form"><textarea id="text" placeholder="输入回复内容"></textarea><button class="send" type="submit">发送</button></form></div><script>const secret={json.dumps(secret)};let selected={json.dumps(selected)};const defaultContacts={json.dumps(DEFAULT_CONTACTS, ensure_ascii=False)};{CHAT_JS}</script></body></html>"""
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Chat</title><style>{CHAT_CSS}</style></head><body><div class="app"><header><div class="topbar"><h1 id="title">BarkBridge Chat</h1><a class="settings" href="/settings?secret={esc(secret)}">设置</a></div><input id="search" class="search" placeholder="搜索联系人"><div class="hint">只显示 BarkBridge 启用后经手的完整消息</div></header><nav class="contacts" id="contacts"></nav><main class="messages" id="messages"></main><form id="form"><textarea id="text" placeholder="输入回复内容"></textarea><button class="send" type="submit">发送</button></form></div><script>const secret={json.dumps(secret)};let selected={json.dumps(selected)};{CHAT_JS}</script></body></html>"""
 
 
 BASE_CSS = """
@@ -527,6 +610,7 @@ CHAT_CSS = """
 .app{min-height:100svh;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto}
 header{position:sticky;top:0;z-index:2;background:var(--panel);border-bottom:1px solid var(--line);padding:calc(12px + env(safe-area-inset-top)) 14px 12px}
 h1{margin:0;font-size:21px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hint{color:var(--muted);font-size:13px;margin-top:4px}
+.topbar{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center}.settings{color:var(--green);font-size:15px;font-weight:800;text-decoration:none}.search{width:100%;height:42px;margin-top:10px;border:1px solid var(--line);border-radius:8px;background:#2a2d31;color:var(--text);font:17px inherit;padding:0 12px}
 .contacts{display:flex;gap:8px;overflow:auto;padding:10px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
 .contact{white-space:nowrap;border:1px solid var(--line);border-radius:999px;background:#2a2d31;color:var(--text);padding:8px 12px;font:15px inherit}.contact.active{background:var(--green);color:#03150a;border-color:var(--green);font-weight:800}
 .messages{overflow:auto;padding:14px 12px 118px;display:flex;flex-direction:column;gap:10px}.msg{max-width:88%;display:grid;gap:4px}.msg.in{align-self:flex-start}.msg.out{align-self:flex-end}
@@ -538,11 +622,31 @@ textarea{height:72px;resize:none;border:1px solid var(--line);border-radius:8px;
 
 
 CHAT_JS = r"""
-let history=[];const contactsEl=document.getElementById("contacts"),messagesEl=document.getElementById("messages"),titleEl=document.getElementById("title"),textEl=document.getElementById("text");
+let history=[],contacts=[];const contactsEl=document.getElementById("contacts"),messagesEl=document.getElementById("messages"),titleEl=document.getElementById("title"),textEl=document.getElementById("text"),searchEl=document.getElementById("search");
 function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}function fmt(t){const d=new Date(t||Date.now());return String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")}
-async function load(){const r=await fetch("/api/chat?secret="+encodeURIComponent(secret),{cache:"no-store"});const data=await r.json();history=data.history||[];const contacts=[...new Set([selected,...defaultContacts,...history.map(i=>i.contact)].filter(Boolean))];if(!selected&&contacts.length)selected=contacts[0];contactsEl.innerHTML=contacts.map(c=>'<button type="button" class="contact '+(c===selected?'active':'')+'" data-contact="'+esc(c)+'">'+esc(c)+'</button>').join("");contactsEl.querySelectorAll(".contact").forEach(b=>b.onclick=()=>{selected=b.dataset.contact;render()});render()}
+async function load(){const [chatRes,contactRes]=await Promise.all([fetch("/api/chat?secret="+encodeURIComponent(secret),{cache:"no-store"}),fetch("/api/contacts?secret="+encodeURIComponent(secret),{cache:"no-store"})]);const data=await chatRes.json();const contactData=await contactRes.json();history=data.history||[];contacts=[...new Set([selected,...(contactData.contacts||[]),...history.map(i=>i.contact)].filter(Boolean))];if(!selected&&contacts.length)selected=contacts[0];renderContacts();render()}
+function renderContacts(){const q=(searchEl.value||"").trim().toLowerCase();const visible=contacts.filter(c=>!q||c.toLowerCase().includes(q));contactsEl.innerHTML=visible.map(c=>'<button type="button" class="contact '+(c===selected?'active':'')+'" data-contact="'+esc(c)+'">'+esc(c)+'</button>').join("");contactsEl.querySelectorAll(".contact").forEach(b=>b.onclick=()=>{selected=b.dataset.contact;renderContacts();render()})}
 function render(){titleEl.textContent=selected||"BarkBridge Chat";contactsEl.querySelectorAll(".contact").forEach(b=>b.classList.toggle("active",b.dataset.contact===selected));const items=history.filter(i=>!selected||i.contact===selected).reverse();messagesEl.innerHTML=items.map(i=>'<article class="msg '+(i.direction==="incoming"?'in':'out')+'"><div class="bubble">'+esc(i.text||"")+'</div><div class="meta">'+esc(i.contact||"")+' · '+esc(i.status||"")+' · '+fmt(i.createdAt)+'</div></article>').join("")||'<div class="hint">暂无消息</div>';messagesEl.scrollTop=messagesEl.scrollHeight}
-document.getElementById("form").onsubmit=async e=>{e.preventDefault();const text=textEl.value.trim();if(!selected||!text)return;const form=new FormData();form.set("secret",secret);form.set("contact",selected);form.set("text",text);const r=await fetch("/send",{method:"POST",body:form});if(!r.ok)alert("提交失败");else{textEl.value="";await load()}};load();setInterval(load,5000);
+searchEl.oninput=renderContacts;document.getElementById("form").onsubmit=async e=>{e.preventDefault();const text=textEl.value.trim();if(!selected||!text)return;const form=new FormData();form.set("secret",secret);form.set("contact",selected);form.set("text",text);const r=await fetch("/send",{method:"POST",body:form});if(!r.ok)alert("提交失败");else{textEl.value="";await load()}};load();setInterval(load,5000);
+"""
+
+
+SETTINGS_CSS = """
+:root{color-scheme:dark;--bg:#151719;--panel:#202327;--line:#34383d;--text:#f4f5f6;--muted:#a9b0b6;--green:#07c160}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:18px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
+main{max-width:680px;margin:0 auto;padding:calc(16px + env(safe-area-inset-top)) 14px calc(18px + env(safe-area-inset-bottom))}
+header{display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;margin-bottom:14px}h1{margin:0;font-size:24px}a{color:var(--green);font-weight:800;text-decoration:none}
+section{margin-top:14px}label{display:block;margin-bottom:8px;color:var(--muted);font-size:14px}textarea{width:100%;min-height:180px;resize:vertical;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--text);font:18px/1.5 inherit;padding:12px}
+button{width:100%;height:52px;margin-top:16px;border:0;border-radius:8px;background:var(--green);color:#03150a;font-size:18px;font-weight:900}#status{min-height:24px;color:var(--muted)}
+"""
+
+
+SETTINGS_JS = r"""
+const pinned=document.getElementById("pinned"),hidden=document.getElementById("hidden"),statusEl=document.getElementById("status");
+function lines(value){return String(value||"").split(/\n/).map(v=>v.trim()).filter(Boolean)}
+async function load(){const r=await fetch("/api/config?secret="+encodeURIComponent(secret),{cache:"no-store"});const data=await r.json();const c=data.config||{};pinned.value=(c.pinnedContacts||[]).join("\n");hidden.value=(c.hiddenContacts||[]).join("\n")}
+document.getElementById("save").onclick=async()=>{statusEl.textContent="正在保存";const r=await fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({secret,pinnedContacts:lines(pinned.value),hiddenContacts:lines(hidden.value)})});statusEl.textContent=r.ok?"已保存":"保存失败"};
+load();
 """
 
 

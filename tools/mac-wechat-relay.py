@@ -849,13 +849,19 @@ def process_replies(replies, args):
             note_contact_failure(rule["target"])
             normalized["attempts"] = attempts + 1
             normalized["last_error"] = f"{type(exc).__name__}: {exc}"
+            stage_manual_review(contact, text, rule["target"])
+            append_history(contact, text, f"failed: {normalized['last_error']}")
             update_status(last_error=f"{contact}: {normalized['last_error']}")
             if normalized["attempts"] <= args.max_retries:
                 remaining.append(normalized)
                 print(f"queued retry {normalized['attempts']}/{args.max_retries}: {contact}", file=sys.stderr, flush=True)
             else:
                 print(f"drop after retries: {contact}: {normalized['last_error']}", file=sys.stderr, flush=True)
-            send_receipt(args.receipt_url, "BarkBridge 回复失败", f"{contact}: {normalized['last_error']}")
+            send_receipt(
+                args.receipt_url,
+                "BarkBridge 回复失败",
+                format_failure_receipt(contact, rule["target"], normalized["last_error"], normalized["attempts"], args.max_retries),
+            )
     save_pending(remaining)
 
 
@@ -1086,6 +1092,16 @@ def format_receipt(source_contact, target_contact, actual_title, text):
     return f"通知: {source_contact}\n目标: {target_contact}\n识别: {actual_title}\n内容: {preview}"
 
 
+def format_failure_receipt(source_contact, target_contact, error, attempts, max_retries):
+    return (
+        f"通知: {source_contact}\n"
+        f"目标: {target_contact}\n"
+        f"重试: {attempts}/{max_retries}\n"
+        f"处理: 已拦截自动发送，内容已复制到手动确认区\n"
+        f"原因: {error}"
+    )
+
+
 def send_wechat(contact, text, send_shortcut, rule=None):
     if contact in COMMAND_ADAPTER_TARGETS:
         send_command_adapter(contact, text)
@@ -1269,7 +1285,9 @@ def read_selected_chat_title(bounds):
         subprocess.run(["/usr/sbin/screencapture", "-x", "-R", region, path], check=True, timeout=5)
         result = subprocess.run([OCR_HELPER_BIN, path], check=True, capture_output=True, text=True, timeout=15)
         lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-        return " ".join(lines)
+        title = " ".join(lines)
+        update_status(last_identified_title=title or "未识别")
+        return title
     finally:
         try:
             os.remove(path)

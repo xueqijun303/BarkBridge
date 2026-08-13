@@ -20,21 +20,36 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 
 DEFAULT_CONTACTS = [
     "XQJ家庭群",
-    "于磊",
-    "薛启军工作号",
-    "一方小院整修",
     "幸福一家人",
     "2026春节小聚群",
-    "银河湾小院",
-    "胖叔叔",
+    "于磊",
+    "薛启军工作号",
     "薛启军",
+    "悍刀",
+    "银河湾小院",
+    "一方小院整修",
+    "胖叔叔",
     "阳光8.3.2.",
     "可可",
-    "微信ClawBot",
     "吴鹏好物捡漏群",
-    "悍刀",
+    "罗虎、于磊",
+    "家",
     "文件传输助手",
 ]
+
+HIDDEN_CONTACTS = {
+    "BarkBridge配置测试",
+    "BarkBridge手机自测",
+    "阿里云部署测试",
+    "Codex上传复测",
+    "本地测试",
+}
+HIDDEN_CONTACT_PREFIXES = ("BarkBridge", "Codex", "阿里云部署测试", "本地测试")
+
+
+def is_hidden_contact(contact):
+    name = (contact or "").strip()
+    return bool(name and (name in HIDDEN_CONTACTS or name.startswith(HIDDEN_CONTACT_PREFIXES)))
 
 
 class RelayStore:
@@ -191,9 +206,9 @@ class RelayStore:
             rows = db.execute(
                 "select distinct contact from history where contact <> '' order by created_at desc limit 80"
             ).fetchall()
-        contacts = [row[0] for row in rows if row[0]]
+        contacts = [row[0] for row in rows if row[0] and not is_hidden_contact(row[0])]
         for contact in DEFAULT_CONTACTS:
-            if contact not in contacts:
+            if contact not in contacts and not is_hidden_contact(contact):
                 contacts.append(contact)
         return contacts
 
@@ -269,7 +284,11 @@ class RelayHandler(BaseHTTPRequestHandler):
             else:
                 contact = query.get("contact", [""])[0].strip()
                 history = self.server.store.history()
-                self.json({"history": [item for item in history if item["contact"] == contact] if contact else history})
+                if contact:
+                    visible_history = [item for item in history if item["contact"] == contact]
+                else:
+                    visible_history = [item for item in history if not is_hidden_contact(item.get("contact", ""))]
+                self.json({"history": visible_history})
         elif path == "/api/history":
             if not self.allowed(query.get("secret", [""])[0]):
                 self.json({"history": []}, 403)
@@ -481,7 +500,7 @@ def compose_page(secret, contact):
 
 def compose_like_page(title, mode, secret, token, selected):
     options = list(DEFAULT_CONTACTS)
-    if selected and selected not in options:
+    if selected and selected not in options and not is_hidden_contact(selected):
         options.insert(0, selected)
     contacts = "".join(
         f'<button class="contact {"active" if c == selected else ""}" data-contact="{esc(c)}" type="button"><span>{esc(c)}</span></button>'

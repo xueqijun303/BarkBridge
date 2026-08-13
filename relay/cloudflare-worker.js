@@ -121,21 +121,36 @@ function statusFromSource(source) {
 
 const DEFAULT_CONTACTS = [
   "XQJ家庭群",
-  "于磊",
-  "薛启军工作号",
-  "一方小院整修",
   "幸福一家人",
   "2026春节小聚群",
-  "银河湾小院",
-  "胖叔叔",
+  "于磊",
+  "薛启军工作号",
   "薛启军",
+  "悍刀",
+  "银河湾小院",
+  "一方小院整修",
+  "胖叔叔",
   "阳光8.3.2.",
   "可可",
-  "微信ClawBot",
   "吴鹏好物捡漏群",
-  "悍刀",
+  "罗虎、于磊",
+  "家",
   "文件传输助手",
 ];
+
+const HIDDEN_CONTACTS = new Set([
+  "BarkBridge配置测试",
+  "BarkBridge手机自测",
+  "阿里云部署测试",
+  "Codex上传复测",
+  "本地测试",
+]);
+const HIDDEN_CONTACT_PREFIXES = ["BarkBridge", "Codex", "阿里云部署测试", "本地测试"];
+
+function isHiddenContact(contact) {
+  const name = String(contact || "").trim();
+  return Boolean(name && (HIDDEN_CONTACTS.has(name) || HIDDEN_CONTACT_PREFIXES.some(prefix => name.startsWith(prefix))));
+}
 
 export default {
   async fetch(request, env) {
@@ -319,7 +334,9 @@ async function chatJson(url, env) {
   const contact = String(url.searchParams.get("contact") || "").trim();
   const history = Array.isArray(data.history) ? data.history : [];
   return Response.json({
-    history: contact ? history.filter(item => String(item.contact || "") === contact) : history,
+    history: contact
+      ? history.filter(item => String(item.contact || "") === contact)
+      : history.filter(item => !isHiddenContact(item.contact)),
   });
 }
 
@@ -440,7 +457,7 @@ function controlPage(url, env) {
 
 function wechatPage({ title, mode, secret, token, selectedContact, message }) {
   const contacts = [...DEFAULT_CONTACTS];
-  if (selectedContact && !contacts.includes(selectedContact)) contacts.unshift(selectedContact);
+  if (selectedContact && !contacts.includes(selectedContact) && !isHiddenContact(selectedContact)) contacts.unshift(selectedContact);
   const selectedJson = JSON.stringify(selectedContact || "文件传输助手");
   const contactsHtml = contacts.map((contact, index) => `
     <button class="contact ${contact === selectedContact ? "active" : ""}" data-contact="${escapeHtml(contact)}" type="button">

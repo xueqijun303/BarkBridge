@@ -253,6 +253,18 @@ class MainActivity : Activity() {
         card.addView(input("轮询间隔秒，5-300", AppSettings.remoteReplyPollSeconds(this)) {
             AppSettings.setRemoteReplyPollSeconds(this, it)
         }.withTop(8))
+        card.addView(check("启用聊天面板完整消息记录", AppSettings.conversationMirrorEnabled(this)) {
+            AppSettings.setConversationMirrorEnabled(this, it)
+        }.withTop(10))
+        card.addView(input("聊天记录上传 URL", AppSettings.conversationIngestUrl(this)) {
+            AppSettings.setConversationIngestUrl(this, it)
+        }.withTop(8))
+        card.addView(input("iPhone 聊天面板 URL", AppSettings.conversationChatPageUrl(this)) {
+            AppSettings.setConversationChatPageUrl(this, it)
+        }.withTop(8))
+        card.addView(input("聊天面板密钥 secret，可留空复用轮询 URL", AppSettings.conversationRelaySecret(this)) {
+            AppSettings.setConversationRelaySecret(this, it)
+        }.withTop(8))
         return card
     }
 
@@ -631,6 +643,7 @@ class MainActivity : Activity() {
         if (AppSettings.remoteReplyEnabled(this) && AppSettings.remoteReplyTarget(this) !in listOf("mac", "android")) return "远程回复执行端应为 mac 或 android"
         if (AppSettings.remoteReplyEnabled(this) && AppSettings.remoteReplyPageUrl(this).isBlank()) return "远程回复缺少回复页面 URL"
         if (AppSettings.remoteReplyEnabled(this) && AppSettings.remoteReplyTarget(this) != "mac" && AppSettings.remoteReplyPollUrl(this).isBlank()) return "远程回复缺少轮询 URL"
+        if (AppSettings.conversationMirrorEnabled(this) && AppSettings.conversationRelaySecret(this).isBlank() && !AppSettings.remoteReplyPageUrl(this).contains("secret=") && !AppSettings.remoteReplyPollUrl(this).contains("secret=")) return "聊天面板缺少 secret"
         if (QuietHours.isNowQuiet(this)) return "勿扰时段运行中"
         if (PendingPushes.count(this) > 0) return "运行中，有 ${PendingPushes.count(this)} 条待补发"
         return "运行中"
@@ -653,9 +666,9 @@ class MainActivity : Activity() {
     private fun appVersionName(): String {
         return try {
             val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
-            info.versionName ?: "1.3.3"
+            info.versionName ?: "1.3.6"
         } catch (e: Exception) {
-            "1.3.3"
+            "1.3.6"
         }
     }
 

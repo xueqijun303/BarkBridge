@@ -1,4 +1,4 @@
-# BarkBridge v1.3.3
+# BarkBridge v1.3.6
 
 BarkBridge 是一款 Android 工具，可以把选定的微信通知和来电事件转发到 Bark。
 
@@ -17,6 +17,7 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 微信白名单远程回复入口 / Remote reply entry for whitelisted WeChat contacts
 - Bark 回复链接和安卓轮询中转服务 / Bark reply links with Android-side relay polling
 - Mac 微信远程回复模式 / Mac WeChat remote reply mode
+- 完整消息聊天面板 / Full-message chat panel
 - 勿扰时段和重要消息例外 / Quiet hours with important-message exceptions
 - 自定义 Bark 服务器、分组、铃声、图标和通知级别 / Custom Bark server, group, sound, icon, and interruption level
 - 配置导入导出 / Configuration import and export
@@ -39,6 +40,18 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 支持本地属性或 GitHub Secrets 发布签名 / Optional release signing through local properties or GitHub Secrets
 
 ## 最新变化 / What's New
+
+### v1.3.6
+
+- 新增聊天面板：`/chat?secret=...` 可以在 iPhone 浏览器查看 BarkBridge 捕获到的完整微信通知正文和已提交的回复。
+- Android 端新增“聊天面板完整消息记录”配置，微信通知会额外上传到 Worker 的 `/ingest`，不依赖 Bark 通知预览长度。
+- Bark 微信通知现在优先跳转到完整会话页，通知正文中仍保留直接回复链接。
+- 聊天面板只记录 BarkBridge 启用后捕获和发送过的内容，不读取微信数据库，也不会导入历史聊天记录。
+
+- Added a chat panel at `/chat?secret=...` for viewing full WeChat notification text and submitted replies from iPhone.
+- Android now has a conversation-mirror setting that uploads WeChat notifications to the Worker's `/ingest` endpoint, independent of Bark notification preview length.
+- WeChat Bark pushes now open the full conversation page first, while still keeping the direct reply link in the push body.
+- The chat panel only records messages captured or sent after BarkBridge is enabled; it does not read the WeChat database or import old chat history.
 
 ### v1.3.5
 
@@ -190,20 +203,21 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - WeChat forwarding rules support blocked keywords, important keywords, allowed contacts/keywords, and optional group-chat blocking.
 - The main screen is organized into clearer sections for Bark configuration, permissions, privacy, filters, status, and recent records.
 
-## 当前 APK / Current APK
+## APK / APK Artifacts
 
-当前 APK 文件位于：
+GitHub Actions 会生成以下 APK 产物名：
 
-The current APK artifacts are included at:
+GitHub Actions produces APK artifacts with these names:
 
 ```text
-release/BarkBridge_v1.3.3-debug.apk
-release/BarkBridge_v1.3.3-release-unsigned.apk
+BarkBridge_v1.3.6-debug.apk
+BarkBridge_v1.3.6-release.apk
+BarkBridge_v1.3.6-release-unsigned.apk
 ```
 
-Debug APK 可直接用于测试安装。未签名 release APK 需要签名后再公开分发。
+Debug APK 可直接用于测试安装。未签名 release APK 需要签名后再公开分发；如果配置了签名 Secrets，Actions 会生成已签名 release APK。
 
-Debug APKs can be installed for testing. The unsigned release APK must be signed before public distribution.
+Debug APKs can be installed for testing. The unsigned release APK must be signed before public distribution; when signing secrets are configured, Actions produces a signed release APK.
 
 注意：当前构建使用 Android 包名 `com.xueqijun.barkbridge`。较早的 v1.0 debug 构建使用 `com.example.barkbridge`，因此旧包会作为另一个 App 安装，不能原地覆盖升级。
 
@@ -234,9 +248,9 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## 息屏推送 / Screen-Off Delivery
 
-BarkBridge v1.3.3 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
+BarkBridge v1.3.6 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
 
-BarkBridge v1.3.3 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.3.6 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
 
 App 使用前台服务、通知监听重绑、唤醒锁、后台联网状态检测和失败补发队列，让 Bark 推送在息屏期间尽量保持可用。
 
@@ -316,6 +330,30 @@ The updated Worker supports a `waitMs` query parameter, for example `/poll?secre
 Mac 模式下，如果“Mac 回复白名单”留空，所有已正常推送到 Bark 的微信通知都会带回复链接。需要限制联系人时，再填写微信通知标题里显示的联系人名。
 
 In Mac mode, if the Mac reply allowlist is empty, every WeChat notification already forwarded to Bark includes a reply link. Fill it only when you want to restrict reply-enabled contacts.
+
+## 聊天面板 / Chat Panel
+
+聊天面板用于解决 Bark 通知预览显示不全的问题。Android 捕获到微信通知后，会把完整通知正文上传到 Worker 的 `/ingest`，iPhone 打开 `/chat?secret=...` 后可以按联系人查看完整往来内容，并从同一页面提交回复。
+
+The chat panel is designed for cases where Bark's notification preview truncates long text. When Android captures a WeChat notification, it uploads the full notification body to the Worker's `/ingest` endpoint. Open `/chat?secret=...` on iPhone to view full conversations by contact and submit replies from the same page.
+
+App 中可配置：
+
+Configure these fields in the app:
+
+```text
+聊天记录上传 URL: https://your-worker.example.workers.dev/ingest
+iPhone 聊天面板 URL: https://your-worker.example.workers.dev/chat
+聊天面板密钥 secret: your-secret
+```
+
+如果“聊天面板密钥 secret”留空，BarkBridge 会尝试从远程回复页面 URL 或轮询 URL 的 `secret` 参数中复用密钥。
+
+If the chat-panel secret is left empty, BarkBridge tries to reuse the `secret` query parameter from the remote reply page URL or poll URL.
+
+限制：聊天面板只保存 BarkBridge 启用后捕获到的通知正文和通过中转服务提交的回复；它不读取微信数据库，因此不会显示历史聊天记录，也不能补全微信没有放进通知里的内容。
+
+Limitation: the chat panel only stores notification text captured after BarkBridge is enabled and replies submitted through the relay. It does not read the WeChat database, so it cannot import old chat history or recover content that WeChat did not include in the notification.
 
 Mac 微信远程回复：
 
@@ -448,6 +486,6 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-推送类似 `v1.3.3` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
+推送类似 `v1.3.6` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
 
-Pushing a tag such as `v1.3.3` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.3.6` builds APKs and publishes them to the GitHub Release page automatically.

@@ -10,6 +10,7 @@ object ConfigBackup {
         "general_notification_packages", "battery_notification_enabled", "low_battery_threshold",
         "remote_reply_enabled", "remote_reply_target", "remote_reply_contacts", "remote_reply_page_url",
         "remote_reply_poll_url", "remote_reply_poll_seconds",
+        "conversation_mirror_enabled", "conversation_ingest_url", "conversation_chat_page_url", "conversation_relay_secret",
         "quiet_hours_enabled", "quiet_start", "quiet_end", "quiet_allow_important", "quiet_allow_calls",
         "key", "bark_server", "bark_group", "bark_sound", "bark_icon", "bark_level",
         "diagnostic_logs", "mask_phone_logs", "save_message_body",

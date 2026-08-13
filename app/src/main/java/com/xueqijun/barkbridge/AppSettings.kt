@@ -7,6 +7,8 @@ object AppSettings {
     private const val DEFAULT_BLOCK = "广告,拼多多,淘宝"
     private const val DEFAULT_IMPORTANT = "验证码,银行,转账,老板"
     private const val DEFAULT_REPLY_PAGE = "https://barkbridge-relay.xueqijun303.workers.dev/reply"
+    private const val DEFAULT_CHAT_INGEST = "https://barkbridge-relay.xueqijun303.workers.dev/ingest"
+    private const val DEFAULT_CHAT_PAGE = "https://barkbridge-relay.xueqijun303.workers.dev/chat"
 
     fun appEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "app_enabled", true)
     fun setAppEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "app_enabled", value)
@@ -53,6 +55,18 @@ object AppSettings {
 
     fun remoteReplyPollSeconds(ctx: Context): String = Prefs.get(ctx, "remote_reply_poll_seconds").ifBlank { "20" }
     fun setRemoteReplyPollSeconds(ctx: Context, value: String) = Prefs.set(ctx, "remote_reply_poll_seconds", value.trim().ifBlank { "20" })
+
+    fun conversationMirrorEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "conversation_mirror_enabled", true)
+    fun setConversationMirrorEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "conversation_mirror_enabled", value)
+
+    fun conversationIngestUrl(ctx: Context): String = Prefs.get(ctx, "conversation_ingest_url").ifBlank { DEFAULT_CHAT_INGEST }.trim()
+    fun setConversationIngestUrl(ctx: Context, value: String) = Prefs.set(ctx, "conversation_ingest_url", value.trim())
+
+    fun conversationChatPageUrl(ctx: Context): String = Prefs.get(ctx, "conversation_chat_page_url").ifBlank { DEFAULT_CHAT_PAGE }.trim()
+    fun setConversationChatPageUrl(ctx: Context, value: String) = Prefs.set(ctx, "conversation_chat_page_url", value.trim())
+
+    fun conversationRelaySecret(ctx: Context): String = Prefs.get(ctx, "conversation_relay_secret").trim()
+    fun setConversationRelaySecret(ctx: Context, value: String) = Prefs.set(ctx, "conversation_relay_secret", value.trim())
 
     fun quietHoursEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "quiet_hours_enabled")
     fun setQuietHoursEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "quiet_hours_enabled", value)

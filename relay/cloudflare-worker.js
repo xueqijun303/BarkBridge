@@ -13,7 +13,15 @@ export class RelayRoom {
       await this.enqueue(reply);
       return Response.json({ ok: true });
     }
+    if (url.pathname === "/record" && request.method === "POST") {
+      const message = await request.json();
+      await this.addHistory(message);
+      return Response.json({ ok: true });
+    }
     if (url.pathname === "/history" && request.method === "GET") {
+      return Response.json({ history: await this.history() });
+    }
+    if (url.pathname === "/chat-history" && request.method === "GET") {
       return Response.json({ history: await this.history() });
     }
     if (url.pathname === "/contacts" && request.method === "GET") {
@@ -49,6 +57,8 @@ export class RelayRoom {
       contact: String(reply.contact || "").trim(),
       text: String(reply.text || "").trim(),
       source: String(reply.source || "reply"),
+      direction: String(reply.direction || directionFromSource(reply.source)).trim(),
+      status: String(reply.status || statusFromSource(reply.source)).trim(),
       createdAt: Number(reply.createdAt || Date.now()),
     });
     while (history.length > 300) history.shift();
@@ -97,6 +107,18 @@ export class RelayRoom {
   }
 }
 
+function directionFromSource(source) {
+  if (source === "android") return "incoming";
+  if (source === "reply" || source === "compose") return "outgoing";
+  return "system";
+}
+
+function statusFromSource(source) {
+  if (source === "android") return "received";
+  if (source === "reply" || source === "compose") return "queued";
+  return "event";
+}
+
 const DEFAULT_CONTACTS = [
   "XQJ家庭群",
   "于磊",
@@ -118,7 +140,7 @@ const DEFAULT_CONTACTS = [
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (request.method === "HEAD" && ["/", "/reply", "/compose", "/control"].includes(url.pathname)) {
+    if (request.method === "HEAD" && ["/", "/reply", "/compose", "/control", "/chat"].includes(url.pathname)) {
       return new Response(null, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
     }
     if (url.pathname === "/" && request.method === "GET") {
@@ -129,6 +151,15 @@ export default {
     }
     if (url.pathname === "/reply" && request.method === "POST") {
       return saveReply(request, env);
+    }
+    if (url.pathname === "/ingest" && request.method === "POST") {
+      return saveIncomingMessage(request, env);
+    }
+    if (url.pathname === "/chat" && request.method === "GET") {
+      return chatPage(url, env);
+    }
+    if (url.pathname === "/api/chat" && request.method === "GET") {
+      return chatJson(url, env);
     }
     if (url.pathname === "/compose" && request.method === "GET") {
       return composePage(url, env);
@@ -172,7 +203,7 @@ async function saveReply(request, env) {
     const id = `${Date.now()}-${crypto.randomUUID()}`;
     await relayStub(env).fetch("https://relay.local/enqueue", {
       method: "POST",
-      body: JSON.stringify({ id, token, contact, text, createdAt: Date.now() }),
+      body: JSON.stringify({ id, token, contact, text, direction: "outgoing", status: "queued", createdAt: Date.now() }),
       headers: { "content-type": "application/json" },
     });
     return html("Reply saved", "<main><h1>Reply saved</h1><p>You can close this page.</p></main>");
@@ -180,6 +211,32 @@ async function saveReply(request, env) {
     return workerError(error);
   }
 }
+
+
+async function saveIncomingMessage(request, env) {
+  try {
+    const data = await request.json();
+    const secret = String(data.secret || "").trim();
+    const contact = String(data.contact || "").trim();
+    const text = String(data.text || "").trim();
+    if (env.REPLY_SECRET && secret !== env.REPLY_SECRET) {
+      return Response.json({ ok: false, error: "密钥不正确" }, { status: 403 });
+    }
+    if (!contact || !text) {
+      return Response.json({ ok: false, error: "联系人和内容不能为空" }, { status: 400 });
+    }
+    const id = `${Date.now()}-${crypto.randomUUID()}`;
+    await relayStub(env).fetch("https://relay.local/record", {
+      method: "POST",
+      body: JSON.stringify({ id, token: "mirror", contact, text, direction: "incoming", status: "received", source: "android", createdAt: Number(data.createdAt || Date.now()) }),
+      headers: { "content-type": "application/json" },
+    });
+    return Response.json({ ok: true });
+  } catch (error) {
+    return workerError(error);
+  }
+}
+
 
 async function saveManualMessage(request, env) {
   try {
@@ -199,7 +256,7 @@ async function saveManualMessage(request, env) {
     const id = `${Date.now()}-${crypto.randomUUID()}`;
     await relayStub(env).fetch("https://relay.local/enqueue", {
       method: "POST",
-      body: JSON.stringify({ id, token: "manual", contact, text, createdAt: Date.now(), source: "compose" }),
+      body: JSON.stringify({ id, token: "manual", contact, text, direction: "outgoing", status: "queued", createdAt: Date.now(), source: "compose" }),
       headers: { "content-type": "application/json" },
     });
     return Response.json({ ok: true });
@@ -253,6 +310,19 @@ async function historyJson(url, env) {
   return relayStub(env).fetch("https://relay.local/history");
 }
 
+async function chatJson(url, env) {
+  if (env.REPLY_SECRET && url.searchParams.get("secret") !== env.REPLY_SECRET) {
+    return Response.json({ history: [] }, { status: 403 });
+  }
+  const response = await relayStub(env).fetch("https://relay.local/chat-history");
+  const data = await response.json();
+  const contact = String(url.searchParams.get("contact") || "").trim();
+  const history = Array.isArray(data.history) ? data.history : [];
+  return Response.json({
+    history: contact ? history.filter(item => String(item.contact || "") === contact) : history,
+  });
+}
+
 async function pollReplies(url, env) {
   if (env.REPLY_SECRET && url.searchParams.get("secret") !== env.REPLY_SECRET) {
     return Response.json({ replies: [] }, { status: 403 });
@@ -300,6 +370,45 @@ function composePage(url, env) {
     selectedContact: escapeHtml(url.searchParams.get("contact") || "文件传输助手"),
     message: "",
   });
+}
+
+
+function chatPage(url, env) {
+  const secret = url.searchParams.get("secret") || "";
+  if (env.REPLY_SECRET && secret !== env.REPLY_SECRET) {
+    return errorPage("密钥不正确", "请使用带 secret 参数的 BarkBridge 聊天面板。");
+  }
+  const selectedContact = url.searchParams.get("contact") || "";
+  const selectedJson = JSON.stringify(selectedContact);
+  return new Response(`<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <title>BarkBridge Chat</title>
+  <style>
+    :root{color-scheme:dark;--bg:#151719;--panel:#202327;--line:#34383d;--text:#f4f5f6;--muted:#a9b0b6;--green:#07c160;--in:#2b2f33;--out:#12b969}
+    *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:var(--bg);color:var(--text);font:17px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
+    .app{min-height:100svh;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto}
+    header{position:sticky;top:0;z-index:2;background:var(--panel);border-bottom:1px solid var(--line);padding:calc(12px + env(safe-area-inset-top)) 14px 12px}
+    h1{margin:0;font-size:21px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hint{color:var(--muted);font-size:13px;margin-top:4px}
+    .contacts{display:flex;gap:8px;overflow:auto;padding:10px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+    .contact{white-space:nowrap;border:1px solid var(--line);border-radius:999px;background:#2a2d31;color:var(--text);padding:8px 12px;font:15px inherit}.contact.active{background:var(--green);color:#03150a;border-color:var(--green);font-weight:800}
+    .messages{overflow:auto;padding:14px 12px 118px;display:flex;flex-direction:column;gap:10px}.msg{max-width:88%;display:grid;gap:4px}.msg.in{align-self:flex-start}.msg.out{align-self:flex-end}
+    .bubble{border-radius:8px;padding:10px 12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:18px}.in .bubble{background:var(--in)}.out .bubble{background:var(--out);color:#03150a}.meta{color:var(--muted);font-size:12px}.out .meta{text-align:right}
+    form{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:1fr 76px;gap:8px;background:var(--panel);border-top:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom))}
+    textarea{height:72px;resize:none;border:1px solid var(--line);border-radius:8px;background:#2a2d31;color:var(--text);font-family:inherit;font-size:21px;line-height:1.4;padding:10px 12px}button.send{height:72px;border:0;border-radius:8px;background:var(--green);color:#03150a;font-weight:800;font-size:17px}
+    @media(min-width:900px){body{display:grid;place-items:center}.app{width:min(940px,calc(100vw - 32px));height:min(780px,calc(100vh - 32px));min-height:0;border:1px solid var(--line);border-radius:8px;overflow:hidden}form{position:static}.messages{padding-bottom:14px}}
+  </style>
+</head>
+<body><div class="app"><header><h1 id="title">BarkBridge Chat</h1><div class="hint">只显示 BarkBridge 启用后经手的完整消息</div></header><nav class="contacts" id="contacts"></nav><main class="messages" id="messages"></main><form id="form"><textarea id="text" placeholder="输入回复内容"></textarea><button class="send" type="submit">发送</button></form></div>
+<script>
+const secret=${JSON.stringify(secret)};let selected=${selectedJson};let history=[];const contactsEl=document.getElementById("contacts"),messagesEl=document.getElementById("messages"),titleEl=document.getElementById("title"),textEl=document.getElementById("text");
+function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}function fmt(t){const d=new Date(t||Date.now());return String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")}
+async function load(){const r=await fetch("/api/chat?secret="+encodeURIComponent(secret),{cache:"no-store"});const data=await r.json();history=data.history||[];const contacts=[...new Set(history.map(i=>i.contact).filter(Boolean))];if(!selected&&contacts.length)selected=contacts[0];contactsEl.innerHTML=contacts.map(c=>'<button type="button" class="contact '+(c===selected?'active':'')+'" data-contact="'+esc(c)+'">'+esc(c)+'</button>').join("");contactsEl.querySelectorAll(".contact").forEach(b=>b.onclick=()=>{selected=b.dataset.contact;render()});render()}
+function render(){titleEl.textContent=selected||"BarkBridge Chat";contactsEl.querySelectorAll(".contact").forEach(b=>b.classList.toggle("active",b.dataset.contact===selected));const items=history.filter(i=>!selected||i.contact===selected).reverse();messagesEl.innerHTML=items.map(i=>'<article class="msg '+(i.direction==="incoming"?'in':'out')+'"><div class="bubble">'+esc(i.text||"")+'</div><div class="meta">'+esc(i.contact||"")+' · '+esc(i.status||"")+' · '+fmt(i.createdAt)+'</div></article>').join("")||'<div class="hint">暂无消息</div>';messagesEl.scrollTop=messagesEl.scrollHeight}
+document.getElementById("form").onsubmit=async e=>{e.preventDefault();const text=textEl.value.trim();if(!selected||!text)return;const form=new FormData();form.set("secret",secret);form.set("contact",selected);form.set("text",text);const r=await fetch("/send",{method:"POST",body:form});if(!r.ok)alert("提交失败");else{textEl.value="";await load()}};load();setInterval(load,5000);
+</script></body></html>`, { headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
 
@@ -533,7 +642,7 @@ function homePage() {
     `<main>
       <h1>BarkBridge Relay</h1>
       <p class="message">中继服务正在运行。主动发送页面需要带 secret 参数打开；Bark 通知里的回复链接会自动携带 token。</p>
-      <p class="hint">可用路径：<br>/compose?secret=你的密钥<br>/reply?token=通知令牌<br>/poll?secret=你的密钥&amp;waitMs=0</p>
+      <p class="hint">可用路径：<br>/chat?secret=你的密钥<br>/compose?secret=你的密钥<br>/control?secret=你的密钥<br>/reply?token=通知令牌<br>/poll?secret=你的密钥&amp;waitMs=0</p>
     </main>`
   );
 }

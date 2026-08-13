@@ -35,7 +35,7 @@ object ConversationMirror {
                 conn.readTimeout = 10000
                 conn.doOutput = true
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                conn.setRequestProperty("User-Agent", "BarkBridge/1.3.7 Android")
+                conn.setRequestProperty("User-Agent", "BarkBridge/1.3.8 Android")
                 conn.outputStream.use { it.write(body) }
                 val code = conn.responseCode
                 if (code !in 200..299) {

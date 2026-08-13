@@ -827,8 +827,8 @@ def process_replies(replies, args):
             print(f"manual-review: {contact} -> {rule['target']} ({reason})", flush=True)
             send_receipt(args.receipt_url, "BarkBridge 未自动发送", f"{reason}，已复制内容: {contact} -> {rule['target']}")
             continue
-        if is_recently_processed(rule["target"], text):
-            print(f"skip duplicate: {contact} -> {rule['target']}", flush=True)
+        if is_recently_processed(normalized["id"]):
+            print(f"skip already processed: {contact} -> {rule['target']} ({normalized['id']})", flush=True)
             continue
         if not rule["auto_send"]:
             stage_manual_review(contact, text, rule["target"])
@@ -838,7 +838,7 @@ def process_replies(replies, args):
         try:
             with SEND_LOCK:
                 result = send_wechat(rule["target"], text, args.send_shortcut, rule)
-            remember_processed(rule["target"], text)
+            remember_processed(normalized["id"], rule["target"], text)
             CONTACT_FAILURES.pop(rule["target"], None)
             update_status(last_reply_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), last_send_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), last_success=f"{contact} -> {rule['target']}", last_identified_title=result["actual_title"], last_error="")
             append_history(contact, text, f"sent: {result['actual_title']}")
@@ -1037,13 +1037,15 @@ def load_processed():
         return []
 
 
-def processed_key(contact, text):
-    return f"{str(contact).strip()}\n{str(text).strip()}"
+def processed_key(reply_id):
+    return str(reply_id or "").strip()
 
 
-def is_recently_processed(contact, text, window_seconds=1800):
+def is_recently_processed(reply_id, window_seconds=1800):
+    if not reply_id:
+        return False
     now = int(time.time())
-    key = processed_key(contact, text)
+    key = processed_key(reply_id)
     return any(
         item.get("key") == key and now - int(item.get("time") or 0) <= window_seconds
         for item in load_processed()
@@ -1051,13 +1053,13 @@ def is_recently_processed(contact, text, window_seconds=1800):
     )
 
 
-def remember_processed(contact, text):
+def remember_processed(reply_id, contact, text):
     now = int(time.time())
     items = [
         item for item in load_processed()
         if isinstance(item, dict) and now - int(item.get("time") or 0) <= 86400
     ]
-    items.append({"key": processed_key(contact, text), "time": now})
+    items.append({"key": processed_key(reply_id), "contact": str(contact), "text": str(text), "time": now})
     os.makedirs(os.path.dirname(PROCESSED_PATH), exist_ok=True)
     with open(PROCESSED_PATH, "w", encoding="utf-8") as fh:
         json.dump(items[-300:], fh, ensure_ascii=False, indent=2)
@@ -1328,6 +1330,40 @@ on run argv
 end run
 '''
     subprocess.run([osascript_bin(), "-e", script, text, send_shortcut], check=True, timeout=15)
+    verify_input_cleared_after_send(text)
+
+
+def verify_input_cleared_after_send(sent_text):
+    script = r'''
+on run argv
+  set expectedText to item 1 of argv
+  try
+    set previousClipboard to the clipboard as text
+  on error
+    set previousClipboard to ""
+  end try
+
+  tell application "System Events"
+    delay 0.5
+    keystroke "a" using command down
+    delay 0.1
+    keystroke "c" using command down
+    delay 0.2
+  end tell
+
+  try
+    set currentText to the clipboard as text
+  on error
+    set currentText to ""
+  end try
+  set the clipboard to previousClipboard
+
+  if currentText is expectedText then
+    error "发送后输入框仍保留原内容，微信可能没有发出"
+  end if
+end run
+'''
+    subprocess.run([osascript_bin(), "-e", script, sent_text], check=True, timeout=10)
 
 
 if __name__ == "__main__":

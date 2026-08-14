@@ -228,6 +228,11 @@ class RelayStore:
             for row in rows
         ]
 
+    def delete_history_for_contact(self, contact):
+        with self.lock, self.connect() as db:
+            cursor = db.execute("delete from history where contact = ?", (contact,))
+            return cursor.rowcount
+
     def config(self):
         with self.connect() as db:
             rows = db.execute("select key, value from config").fetchall()
@@ -390,6 +395,8 @@ class RelayHandler(BaseHTTPRequestHandler):
             self.save_control()
         elif path == "/api/config":
             self.save_config()
+        elif path == "/api/chat/clear":
+            self.clear_contact_history()
         else:
             self.send_error(404)
 
@@ -475,6 +482,18 @@ class RelayHandler(BaseHTTPRequestHandler):
             return
         config = self.server.store.save_config(data)
         self.json({"ok": True, "config": config, "contacts": self.server.store.contacts()})
+
+    def clear_contact_history(self):
+        data = self.read_json_or_form()
+        if not self.allowed(str(data.get("secret", ""))):
+            self.json({"ok": False, "error": "密钥不正确"}, 403)
+            return
+        contact = str(data.get("contact", "")).strip()
+        if not contact:
+            self.json({"ok": False, "error": "联系人不能为空"}, 400)
+            return
+        deleted = self.server.store.delete_history_for_contact(contact)
+        self.json({"ok": True, "deleted": deleted, "contact": contact})
 
     def enqueue(self, contact, text, source, token):
         item = {
@@ -593,7 +612,7 @@ def compose_like_page(title, mode, secret, token, selected):
 
 
 def chat_page(secret, selected):
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Chat</title><style>{CHAT_CSS}</style></head><body><div class="app"><header><div class="topbar"><h1 id="title">BarkBridge Chat</h1><a class="settings" href="/settings?secret={esc(secret)}">设置</a></div><input id="search" class="search" placeholder="搜索联系人"><div class="hint">只显示 BarkBridge 启用后经手的完整消息</div></header><nav class="contacts" id="contacts"></nav><main class="messages" id="messages"></main><form id="form"><textarea id="text" placeholder="输入回复内容"></textarea><button class="send" type="submit">发送</button></form></div><script>const secret={json.dumps(secret)};let selected={json.dumps(selected)};{CHAT_JS}</script></body></html>"""
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Chat</title><style>{CHAT_CSS}</style></head><body><div class="app"><header><div class="topbar"><h1 id="title">BarkBridge Chat</h1><div class="actions"><button id="clearChat" class="ghost" type="button">清空</button><a class="settings" href="/settings?secret={esc(secret)}">设置</a></div></div><input id="search" class="search" placeholder="搜索联系人"><div class="hint">只显示 BarkBridge 启用后经手的完整消息</div></header><nav class="contacts" id="contacts"></nav><main class="messages" id="messages"></main><form id="form"><textarea id="text" placeholder="输入回复内容"></textarea><button class="send" type="submit">发送</button></form></div><script>const secret={json.dumps(secret)};let selected={json.dumps(selected)};{CHAT_JS}</script></body></html>"""
 
 
 BASE_CSS = """
@@ -610,10 +629,10 @@ CHAT_CSS = """
 .app{height:100dvh;min-height:100svh;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;overflow:hidden}
 header{z-index:2;background:var(--panel);border-bottom:1px solid var(--line);padding:calc(12px + env(safe-area-inset-top)) 14px 12px}
 h1{margin:0;font-size:21px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hint{color:var(--muted);font-size:13px;margin-top:4px}
-.topbar{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center}.settings{color:var(--green);font-size:15px;font-weight:800;text-decoration:none}.search{width:100%;height:42px;margin-top:10px;border:1px solid var(--line);border-radius:8px;background:#2a2d31;color:var(--text);font:17px inherit;padding:0 12px}
+.topbar{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center}.actions{display:flex;align-items:center;gap:10px}.settings{color:var(--green);font-size:15px;font-weight:800;text-decoration:none}.ghost{height:34px;border:1px solid var(--line);border-radius:8px;background:#2a2d31;color:var(--muted);font:15px inherit;font-weight:800;padding:0 10px}.search{width:100%;height:42px;margin-top:10px;border:1px solid var(--line);border-radius:8px;background:#2a2d31;color:var(--text);font:17px inherit;padding:0 12px}
 .contacts{display:flex;gap:8px;overflow:auto;padding:10px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
 .contact{white-space:nowrap;border:1px solid var(--line);border-radius:999px;background:#2a2d31;color:var(--text);padding:8px 12px;font:15px inherit}.contact.active{background:var(--green);color:#03150a;border-color:var(--green);font-weight:800}
-.messages{min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;padding:14px 12px 14px;display:flex;flex-direction:column;gap:10px}.msg{max-width:88%;display:grid;gap:4px}.msg.in{align-self:flex-start}.msg.out{align-self:flex-end}.bottom-anchor{height:1px;min-height:1px}
+.messages{min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;padding:14px 12px 14px;display:flex;flex-direction:column-reverse;gap:10px}.msg{max-width:88%;display:grid;gap:4px}.msg.in{align-self:flex-start}.msg.out{align-self:flex-end}
 .bubble{border-radius:8px;padding:10px 12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:18px}.in .bubble{background:var(--in)}.out .bubble{background:var(--out);color:#03150a}.meta{color:var(--muted);font-size:12px}.out .meta{text-align:right}
 form{display:grid;grid-template-columns:1fr 76px;gap:8px;background:var(--panel);border-top:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom))}
 textarea{height:72px;resize:none;border:1px solid var(--line);border-radius:8px;background:#2a2d31;color:var(--text);font-family:inherit;font-size:21px;line-height:1.4;padding:10px 12px}button.send{height:72px;border:0;border-radius:8px;background:var(--green);color:#03150a;font-weight:800;font-size:17px}
@@ -622,14 +641,15 @@ textarea{height:72px;resize:none;border:1px solid var(--line);border-radius:8px;
 
 
 CHAT_JS = r"""
-let history=[],contacts=[],initialLoad=true;const contactsEl=document.getElementById("contacts"),messagesEl=document.getElementById("messages"),titleEl=document.getElementById("title"),textEl=document.getElementById("text"),searchEl=document.getElementById("search");
+let history=[],contacts=[],initialLoad=true;const contactsEl=document.getElementById("contacts"),messagesEl=document.getElementById("messages"),titleEl=document.getElementById("title"),textEl=document.getElementById("text"),searchEl=document.getElementById("search"),clearChatEl=document.getElementById("clearChat");
 function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}function fmt(t){const d=new Date(t||Date.now());return String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")}
-function nearBottom(){return messagesEl.scrollHeight-messagesEl.scrollTop-messagesEl.clientHeight<96}
-function scrollToBottom(force=false){if(!force&&!nearBottom())return;const run=()=>{const last=messagesEl.querySelector("[data-last='1']");if(last)last.scrollIntoView({block:"end",inline:"nearest"});messagesEl.scrollTop=messagesEl.scrollHeight};requestAnimationFrame(()=>{run();[80,250,600].forEach(ms=>setTimeout(run,ms))})}
+function nearBottom(){return Math.abs(messagesEl.scrollTop)<96}
+function scrollToBottom(force=false){if(!force&&!nearBottom())return;const run=()=>{messagesEl.scrollTop=0};requestAnimationFrame(()=>{run();[80,250,600].forEach(ms=>setTimeout(run,ms))})}
 async function load(options={}){const shouldStick=initialLoad||options.forceScroll||nearBottom();const [chatRes,contactRes]=await Promise.all([fetch("/api/chat?secret="+encodeURIComponent(secret),{cache:"no-store"}),fetch("/api/contacts?secret="+encodeURIComponent(secret),{cache:"no-store"})]);const data=await chatRes.json();const contactData=await contactRes.json();history=data.history||[];contacts=[...new Set([selected,...(contactData.contacts||[]),...history.map(i=>i.contact)].filter(Boolean))];if(!selected&&contacts.length)selected=contacts[0];renderContacts();render(shouldStick);initialLoad=false}
 function renderContacts(){const q=(searchEl.value||"").trim().toLowerCase();const visible=contacts.filter(c=>!q||c.toLowerCase().includes(q));contactsEl.innerHTML=visible.map(c=>'<button type="button" class="contact '+(c===selected?'active':'')+'" data-contact="'+esc(c)+'">'+esc(c)+'</button>').join("");contactsEl.querySelectorAll(".contact").forEach(b=>b.onclick=()=>{selected=b.dataset.contact;renderContacts();render(true)})}
-function render(stick=false){titleEl.textContent=selected||"BarkBridge Chat";contactsEl.querySelectorAll(".contact").forEach(b=>b.classList.toggle("active",b.dataset.contact===selected));const items=history.filter(i=>!selected||i.contact===selected).reverse();messagesEl.innerHTML=(items.map(i=>'<article class="msg '+(i.direction==="incoming"?'in':'out')+'"><div class="bubble">'+esc(i.text||"")+'</div><div class="meta">'+esc(i.contact||"")+' · '+esc(i.status||"")+' · '+fmt(i.createdAt)+'</div></article>').join("")||'<div class="hint">暂无消息</div>')+'<div class="bottom-anchor" data-last="1"></div>';scrollToBottom(stick)}
-searchEl.oninput=renderContacts;document.getElementById("form").onsubmit=async e=>{e.preventDefault();const text=textEl.value.trim();if(!selected||!text)return;const form=new FormData();form.set("secret",secret);form.set("contact",selected);form.set("text",text);const r=await fetch("/send",{method:"POST",body:form});if(!r.ok)alert("提交失败");else{textEl.value="";await load({forceScroll:true})}};load({forceScroll:true});setInterval(()=>load(),5000);
+function render(stick=false){titleEl.textContent=selected||"BarkBridge Chat";contactsEl.querySelectorAll(".contact").forEach(b=>b.classList.toggle("active",b.dataset.contact===selected));clearChatEl.disabled=!selected;const items=history.filter(i=>!selected||i.contact===selected);messagesEl.innerHTML=items.map(i=>'<article class="msg '+(i.direction==="incoming"?'in':'out')+'"><div class="bubble">'+esc(i.text||"")+'</div><div class="meta">'+esc(i.contact||"")+' · '+esc(i.status||"")+' · '+fmt(i.createdAt)+'</div></article>').join("")||'<div class="hint">暂无消息</div>';scrollToBottom(stick)}
+async function clearCurrentChat(){if(!selected)return;if(!confirm("只清除「"+selected+"」的聊天记录？"))return;clearChatEl.disabled=true;const r=await fetch("/api/chat/clear",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({secret,contact:selected})});if(!r.ok)alert("清除失败");await load({forceScroll:true});clearChatEl.disabled=false}
+searchEl.oninput=renderContacts;clearChatEl.onclick=clearCurrentChat;document.getElementById("form").onsubmit=async e=>{e.preventDefault();const text=textEl.value.trim();if(!selected||!text)return;const form=new FormData();form.set("secret",secret);form.set("contact",selected);form.set("text",text);const r=await fetch("/send",{method:"POST",body:form});if(!r.ok)alert("提交失败");else{textEl.value="";await load({forceScroll:true})}};load({forceScroll:true});setInterval(()=>load(),5000);
 """
 
 

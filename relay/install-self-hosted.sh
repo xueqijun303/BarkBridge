@@ -13,6 +13,10 @@ if [[ -z "$SECRET" ]]; then
   exit 1
 fi
 
+if systemctl list-unit-files barkbridge-relay.service >/dev/null 2>&1; then
+  systemctl stop barkbridge-relay.service >/dev/null 2>&1 || true
+fi
+
 if ss -ltn "( sport = :$PORT )" | grep -q ":$PORT"; then
   echo "Port $PORT is already in use. Choose another port with BARKBRIDGE_RELAY_PORT=8788." >&2
   exit 1

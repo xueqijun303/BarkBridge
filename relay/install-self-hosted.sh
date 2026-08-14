@@ -17,8 +17,21 @@ if systemctl list-unit-files barkbridge-relay.service >/dev/null 2>&1; then
   systemctl stop barkbridge-relay.service >/dev/null 2>&1 || true
 fi
 
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  ss -ltn "( sport = :$PORT )" | grep -q ":$PORT" || break
+  sleep 0.3
+done
+
+OLD_PIDS="$(pgrep -f "self-hosted-relay.py.*--port ${PORT}" || true)"
+if [[ -n "$OLD_PIDS" ]]; then
+  echo "Stopping old BarkBridge relay process: $OLD_PIDS"
+  kill $OLD_PIDS >/dev/null 2>&1 || true
+  sleep 1
+fi
+
 if ss -ltn "( sport = :$PORT )" | grep -q ":$PORT"; then
-  echo "Port $PORT is already in use. Choose another port with BARKBRIDGE_RELAY_PORT=8788." >&2
+  echo "Port $PORT is still in use. Current listener:" >&2
+  ss -ltnp "( sport = :$PORT )" >&2 || true
   exit 1
 fi
 

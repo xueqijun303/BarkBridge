@@ -1,4 +1,4 @@
-# BarkBridge v1.3.9
+# BarkBridge v1.3.10
 
 BarkBridge 是一款 Android 工具，可以把选定的微信通知和来电事件转发到 Bark。
 
@@ -6,13 +6,13 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 
 ## 当前状态 / Current Status
 
-- 当前稳定版本：`v1.3.9`。
+- 当前稳定版本：`v1.3.10`。
 - Android 端已切换到阿里云自托管中继，默认地址为 `http://47.101.153.215:8787`。
 - iPhone 端统一使用 `/chat` 聊天/回复页面查看完整消息、选择联系人和提交回复。
 - Mac 端通过轮询中继服务接收回复指令，并使用 Mac 微信客户端代发。
 - 自托管中继已验证 `/chat`、`/settings`、`/control`、`/api/status` 和 `/health` 可用。
 
-- Current stable version: `v1.3.9`.
+- Current stable version: `v1.3.10`.
 - Android now uses the Aliyun self-hosted relay by default at `http://47.101.153.215:8787`.
 - iPhone uses the unified `/chat` page to view full messages, choose contacts, and submit replies.
 - Mac polls the relay service for reply commands and sends them through Mac WeChat.
@@ -31,6 +31,7 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 微信白名单远程回复入口 / Remote reply entry for whitelisted WeChat contacts
 - Bark 回复链接和安卓轮询中转服务 / Bark reply links with Android-side relay polling
 - Mac 微信远程回复模式 / Mac WeChat remote reply mode
+- 微信语音消息 Mac 转文字实验模式 / Experimental Mac WeChat voice-to-text mode
 - 统一聊天/回复页面 / Unified chat and reply page
 - 完整消息聊天面板 / Full-message chat panel
 - 聊天联系人搜索、置顶、隐藏 / Chat contact search, pinning, and hiding
@@ -59,6 +60,20 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 支持本地属性或 GitHub Secrets 发布签名 / Optional release signing through local properties or GitHub Secrets
 
 ## 最新变化 / What's New
+
+### v1.3.10
+
+- Android 端识别微信语音通知，并在聊天面板中记录“等待 Mac 微信转文字”的占位消息。
+- 新增“微信语音消息请求 Mac 转文字”开关，可随时关闭实验功能。
+- 自托管中继收到语音转文字请求后，会把 `voice_transcribe` 任务放入 Mac relay 轮询队列。
+- Mac relay 新增实验性语音转文字处理：打开对应微信会话，尝试调用 Mac 微信的“转文字/转换为文字”菜单，并把转出的文字回写到聊天面板。
+- Mac relay 支持 `--ingest-url`，默认可从 `--poll-url` 自动推导 `/ingest` 回写地址。
+
+- Android now detects WeChat voice notifications and records a pending voice-to-text placeholder in the chat panel.
+- Added a "微信语音消息请求 Mac 转文字" toggle so the experimental feature can be disabled at any time.
+- The self-hosted relay now queues a `voice_transcribe` task for Mac relay when it receives a voice transcription request.
+- Mac relay adds experimental voice-to-text handling by opening the matching WeChat conversation, trying WeChat's built-in voice-to-text menu, and writing the result back to the chat panel.
+- Mac relay supports `--ingest-url`; by default it derives `/ingest` from `--poll-url`.
 
 ### v1.3.9
 
@@ -265,9 +280,9 @@ GitHub Actions 会生成以下 APK 产物名：
 GitHub Actions produces APK artifacts with these names:
 
 ```text
-BarkBridge_v1.3.9-debug.apk
-BarkBridge_v1.3.9-release.apk
-BarkBridge_v1.3.9-release-unsigned.apk
+BarkBridge_v1.3.10-debug.apk
+BarkBridge_v1.3.10-release.apk
+BarkBridge_v1.3.10-release-unsigned.apk
 ```
 
 Debug APK 可直接用于测试安装。未签名 release APK 需要签名后再公开分发；如果配置了签名 Secrets，Actions 会生成已签名 release APK。
@@ -303,9 +318,9 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## 息屏推送 / Screen-Off Delivery
 
-BarkBridge v1.3.9 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
+BarkBridge v1.3.10 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
 
-BarkBridge v1.3.9 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.3.10 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
 
 App 使用前台服务、通知监听重绑、唤醒锁、后台联网状态检测和失败补发队列，让 Bark 推送在息屏期间尽量保持可用。
 
@@ -521,6 +536,7 @@ The Mac relay writes staged logs:
 picked: 联系人: 回复内容
 sent: 联系人
 queued retry 1/5: 联系人
+voice-transcribed: 联系人: 转文字内容
 ```
 
 首次运行时，macOS 通常会要求给运行脚本的 App 授予“辅助功能”权限。路径：
@@ -604,6 +620,6 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-推送类似 `v1.3.9` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
+推送类似 `v1.3.10` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
 
-Pushing a tag such as `v1.3.9` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.3.10` builds APKs and publishes them to the GitHub Release page automatically.

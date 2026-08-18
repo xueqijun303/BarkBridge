@@ -7,7 +7,7 @@ import java.net.URL
 import java.net.URLEncoder
 
 object ConversationMirror {
-    fun recordIncoming(ctx: Context, contact: String, text: String) {
+    fun recordIncoming(ctx: Context, contact: String, text: String, mediaType: String = "", requestTranscription: Boolean = false) {
         if (!AppSettings.conversationMirrorEnabled(ctx)) return
         val endpoint = AppSettings.conversationIngestUrl(ctx)
         if (endpoint.isBlank() || contact.isBlank() || text.isBlank()) return
@@ -26,6 +26,8 @@ object ConversationMirror {
                     .put("text", text)
                     .put("direction", "incoming")
                     .put("source", "android")
+                    .put("mediaType", mediaType)
+                    .put("requestTranscription", requestTranscription)
                     .put("createdAt", System.currentTimeMillis())
                     .toString()
                     .toByteArray(Charsets.UTF_8)
@@ -35,7 +37,7 @@ object ConversationMirror {
                 conn.readTimeout = 10000
                 conn.doOutput = true
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                conn.setRequestProperty("User-Agent", "BarkBridge/1.3.8 Android")
+                conn.setRequestProperty("User-Agent", "BarkBridge/1.3.10 Android")
                 conn.outputStream.use { it.write(body) }
                 val code = conn.responseCode
                 if (code !in 200..299) {

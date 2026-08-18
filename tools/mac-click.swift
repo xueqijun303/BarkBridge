@@ -1,8 +1,8 @@
 import CoreGraphics
 import Foundation
 
-if CommandLine.arguments.count != 3 {
-    fputs("usage: mac-click x y\n", stderr)
+if CommandLine.arguments.count != 3 && CommandLine.arguments.count != 4 {
+    fputs("usage: mac-click x y [left|right]\n", stderr)
     exit(2)
 }
 
@@ -12,9 +12,14 @@ guard let x = Double(CommandLine.arguments[1]), let y = Double(CommandLine.argum
 }
 
 let point = CGPoint(x: x, y: y)
-CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+let buttonName = CommandLine.arguments.count == 4 ? CommandLine.arguments[3].lowercased() : "left"
+let button: CGMouseButton = buttonName == "right" ? .right : .left
+let downType: CGEventType = buttonName == "right" ? .rightMouseDown : .leftMouseDown
+let upType: CGEventType = buttonName == "right" ? .rightMouseUp : .leftMouseUp
+
+CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: button)?.post(tap: .cghidEventTap)
 usleep(80_000)
-CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+CGEvent(mouseEventSource: nil, mouseType: downType, mouseCursorPosition: point, mouseButton: button)?.post(tap: .cghidEventTap)
 usleep(80_000)
-CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+CGEvent(mouseEventSource: nil, mouseType: upType, mouseCursorPosition: point, mouseButton: button)?.post(tap: .cghidEventTap)
 usleep(250_000)

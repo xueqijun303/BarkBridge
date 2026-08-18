@@ -156,6 +156,9 @@ class RelayStore:
 
     def enqueue(self, item):
         self.add_history(item)
+        self.enqueue_task(item)
+
+    def enqueue_task(self, item):
         with self.lock:
             waiter = self.waiters.pop(0) if self.waiters else None
             if waiter:
@@ -471,17 +474,37 @@ class RelayHandler(BaseHTTPRequestHandler):
         if not contact or not text:
             self.json({"ok": False, "error": "联系人和内容不能为空"}, 400)
             return
+        media_type = str(data.get("mediaType", "")).strip().lower()
+        request_transcription = data.get("requestTranscription") is True or str(data.get("requestTranscription", "")).lower() == "true"
+        source = str(data.get("source", "android")).strip() or "android"
+        status = "voice-pending" if media_type == "voice" and request_transcription else ("transcribed" if source == "mac_voice_transcribe" else "received")
+        created_at = int(data.get("createdAt") or now_ms())
         self.server.store.add_history(
             {
                 "id": make_id(),
                 "contact": contact,
                 "text": text,
-                "source": "android",
+                "source": source,
                 "direction": "incoming",
-                "status": "received",
-                "createdAt": int(data.get("createdAt") or now_ms()),
+                "status": status,
+                "createdAt": created_at,
             }
         )
+        if media_type == "voice" and request_transcription:
+            self.server.store.enqueue_task(
+                {
+                    "id": make_id(),
+                    "token": "voice",
+                    "contact": contact,
+                    "text": text,
+                    "source": "voice",
+                    "action": "voice_transcribe",
+                    "value": created_at,
+                    "direction": "system",
+                    "status": "queued",
+                    "createdAt": now_ms(),
+                }
+            )
         self.json({"ok": True})
 
     def save_reply(self):

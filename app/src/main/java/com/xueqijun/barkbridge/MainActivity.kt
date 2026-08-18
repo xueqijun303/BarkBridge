@@ -256,6 +256,9 @@ class MainActivity : Activity() {
         card.addView(check("启用聊天面板完整消息记录", AppSettings.conversationMirrorEnabled(this)) {
             AppSettings.setConversationMirrorEnabled(this, it)
         }.withTop(10))
+        card.addView(check("微信语音消息请求 Mac 转文字", AppSettings.voiceTranscriptionEnabled(this)) {
+            AppSettings.setVoiceTranscriptionEnabled(this, it)
+        }.withTop(8))
         card.addView(input("聊天记录上传 URL", AppSettings.conversationIngestUrl(this)) {
             AppSettings.setConversationIngestUrl(this, it)
         }.withTop(8))
@@ -677,9 +680,9 @@ class MainActivity : Activity() {
     private fun appVersionName(): String {
         return try {
             val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
-            info.versionName ?: "1.3.9"
+            info.versionName ?: "1.3.10"
         } catch (e: Exception) {
-            "1.3.8"
+            "1.3.10"
         }
     }
 

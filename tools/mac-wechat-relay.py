@@ -98,6 +98,8 @@ def main():
     parser.add_argument("--poll-timeout", type=int, default=0, help="HTTP timeout for relay polling in seconds. 0 means auto-detect.")
     parser.add_argument("--worker-wait-ms", type=int, default=-1, help="Worker long-poll wait time in milliseconds. -1 means auto-detect, 0 means immediate polling.")
     parser.add_argument("--receipt-url", default=os.environ.get("BARKBRIDGE_RECEIPT_URL", ""), help="Optional Bark endpoint URL for send receipts, for example https://api.day.app/key.")
+    parser.add_argument("--ingest-url", default=os.environ.get("BARKBRIDGE_INGEST_URL", ""), help="Optional relay ingest URL for writing voice transcription results. Defaults to /ingest derived from --poll-url.")
+    parser.add_argument("--disable-voice-transcribe", action="store_true", help="Disable experimental Mac WeChat voice-to-text tasks.")
     parser.add_argument("--max-retries", type=int, default=5, help="Maximum local retry attempts for failed sends.")
     parser.add_argument("--send-shortcut", choices=["enter", "cmd-enter", "both"], default="both", help="WeChat send shortcut to use after pasting the reply.")
     parser.add_argument("--web-host", default="127.0.0.1", help="Local web console host.")
@@ -806,6 +808,9 @@ def process_replies(replies, args):
     remaining = []
     for reply in replies:
         normalized = normalize_reply(reply)
+        if normalized["action"] == "voice_transcribe":
+            handle_voice_transcribe(normalized, args)
+            continue
         if normalized["source"] == "control" or normalized["action"]:
             handle_remote_control(normalized, args)
             continue
@@ -874,9 +879,45 @@ def normalize_reply(reply):
         "source": str(reply.get("source") or "").strip(),
         "action": str(reply.get("action") or "").strip(),
         "value": reply.get("value"),
+        "createdAt": int(reply.get("createdAt") or 0),
         "attempts": int(reply.get("attempts") or 0),
         "last_error": str(reply.get("last_error") or ""),
     }
+
+
+def handle_voice_transcribe(task, args):
+    contact = task["contact"]
+    if not contact:
+        print(f"skip invalid voice task: {task}", flush=True)
+        return
+    if args.disable_voice_transcribe:
+        print(f"voice-transcribe disabled: {contact}", flush=True)
+        return
+    if is_recently_processed(task["id"]):
+        print(f"skip already processed voice task: {contact} ({task['id']})", flush=True)
+        return
+    rule = resolve_contact_rule(contact)
+    try:
+        with SEND_LOCK:
+            result = transcribe_latest_voice(rule["target"], rule)
+        text = result["text"].strip()
+        remember_processed(task["id"], rule["target"], text)
+        append_history(contact, text, f"voice-transcribed: {result['actual_title']}")
+        update_status(
+            last_reply_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            last_success=f"语音转文字: {contact}",
+            last_identified_title=result["actual_title"],
+            last_error="",
+        )
+        upload_transcription(args, contact, text)
+        send_receipt(args.receipt_url, "BarkBridge 语音已转文字", f"{contact}\n{text[:500]}")
+        print(f"voice-transcribed: {contact}: {text[:80]}", flush=True)
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        append_history(contact, task["text"], f"voice-transcribe-failed: {error}")
+        update_status(last_error=f"语音转文字失败 {contact}: {error}")
+        send_receipt(args.receipt_url, "BarkBridge 语音转文字失败", f"{contact}\n{error}\n请在 Mac 微信手动点语音转文字。")
+        print(f"voice-transcribe failed: {contact}: {error}", file=sys.stderr, flush=True)
 
 
 def handle_remote_control(command, args):
@@ -1114,6 +1155,159 @@ def send_wechat(contact, text, send_shortcut, rule=None):
     return {"actual_title": actual_title}
 
 
+def transcribe_latest_voice(contact, rule=None):
+    bounds = get_wechat_window_bounds()
+    select_contact_by_search(contact, bounds)
+    actual_title = verify_selected_chat(contact, "语音转文字", bounds, rule or {})
+    before = read_chat_body_text(bounds)
+    trigger_voice_to_text(bounds)
+    time.sleep(3.0)
+    after = read_chat_body_text(bounds)
+    text = extract_transcription(before, after)
+    if not text:
+        raise RuntimeError("未识别到微信转出的文字，可能没有点中语音消息或当前 Mac 微信未显示转文字菜单")
+    return {"actual_title": actual_title, "text": text}
+
+
+def trigger_voice_to_text(bounds):
+    x = bounds["left"] + min(430, max(300, bounds["width"] * 0.34))
+    candidate_ys = [
+        bounds["top"] + bounds["height"] - 170,
+        bounds["top"] + bounds["height"] - 225,
+        bounds["top"] + bounds["height"] - 280,
+    ]
+    last_error = None
+    for y in candidate_ys:
+        try:
+            right_click_at(x, y)
+            if click_voice_to_text_menu_item():
+                return
+        except Exception as exc:
+            last_error = exc
+    if last_error:
+        raise RuntimeError(f"无法打开语音转文字菜单: {last_error}") from last_error
+    raise RuntimeError("没有找到微信语音转文字菜单项")
+
+
+def click_voice_to_text_menu_item():
+    script = r'''
+on run argv
+  tell application "System Events"
+    tell process "WeChat"
+      set menuNames to {"转文字", "转换为文字", "语音转文字", "Convert to Text", "Speech to Text"}
+      repeat 15 times
+        repeat with candidateMenu in menus
+          repeat with targetName in menuNames
+            try
+              click menu item (targetName as text) of candidateMenu
+              return "ok"
+            end try
+          end repeat
+          try
+            repeat with itemRef in menu items of candidateMenu
+              set itemTitle to name of itemRef
+              if itemTitle contains "转文字" or itemTitle contains "转换为文字" or itemTitle contains "语音转文字" then
+                click itemRef
+                return "ok"
+              end if
+            end repeat
+          end try
+        end repeat
+        delay 0.1
+      end repeat
+    end tell
+    key code 53
+  end tell
+  return "missing"
+end run
+'''
+    result = subprocess.run([osascript_bin(), "-e", script], check=True, capture_output=True, text=True, timeout=5)
+    return result.stdout.strip() == "ok"
+
+
+def read_chat_body_text(bounds):
+    ensure_ocr_helper()
+    crop = {
+        "x": bounds["left"] + 250,
+        "y": bounds["top"] + 55,
+        "width": max(420, bounds["width"] - 300),
+        "height": max(300, bounds["height"] - 185),
+    }
+    fd, path = tempfile.mkstemp(prefix="barkbridge-chat-", suffix=".png")
+    os.close(fd)
+    try:
+        region = f"{int(crop['x'])},{int(crop['y'])},{int(crop['width'])},{int(crop['height'])}"
+        subprocess.run(["/usr/sbin/screencapture", "-x", "-R", region, path], check=True, timeout=5)
+        result = subprocess.run([OCR_HELPER_BIN, path], check=True, capture_output=True, text=True, timeout=20)
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    finally:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
+def extract_transcription(before_lines, after_lines):
+    before = {normalize_match_text(line) for line in before_lines}
+    added = [
+        line for line in after_lines
+        if normalize_match_text(line) and normalize_match_text(line) not in before and not is_wechat_ui_text(line)
+    ]
+    if added:
+        return "\n".join(added[-4:]).strip()
+    filtered = [line for line in after_lines if not is_wechat_ui_text(line)]
+    return "\n".join(filtered[-4:]).strip()
+
+
+def is_wechat_ui_text(text):
+    compact = normalize_match_text(text)
+    if not compact:
+        return True
+    ui_words = [
+        "发送", "聊天", "通讯录", "收藏", "搜索", "微信", "文件传输助手",
+        "按住说话", "输入", "表情", "截图", "更多",
+    ]
+    return any(normalize_match_text(word) == compact for word in ui_words)
+
+
+def upload_transcription(args, contact, text):
+    ingest_url = args.ingest_url.strip() or ingest_url_from_poll(args.poll_url)
+    if not ingest_url:
+        raise RuntimeError("缺少 ingest URL，无法回写语音转文字结果")
+    secret = query_param(args.poll_url, "secret")
+    if not secret:
+        raise RuntimeError("poll URL 缺少 secret，无法回写语音转文字结果")
+    payload = {
+        "secret": secret,
+        "contact": contact,
+        "text": f"语音转文字：\n{text}",
+        "direction": "incoming",
+        "source": "mac_voice_transcribe",
+        "mediaType": "voice_text",
+        "createdAt": int(time.time() * 1000),
+    }
+    request = urllib.request.Request(
+        ingest_url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json; charset=utf-8", "User-Agent": "BarkBridge-MacRelay/1.0"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        body = response.read().decode("utf-8", errors="replace")
+        if response.status < 200 or response.status >= 300:
+            raise RuntimeError(f"ingest HTTP {response.status}: {body[:200]}")
+
+
+def ingest_url_from_poll(poll_url):
+    parsed = urllib.parse.urlparse(poll_url)
+    return urllib.parse.urlunparse(parsed._replace(path="/ingest", query="", params="", fragment=""))
+
+
+def query_param(url, name):
+    parsed = urllib.parse.urlparse(url)
+    return dict(urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)).get(name, "")
+
+
 def command_adapter_for(contact, rule=None):
     env_name = f"BARKBRIDGE_{contact.upper()}_COMMAND"
     env_command = os.environ.get(env_name)
@@ -1230,6 +1424,11 @@ def ensure_ocr_helper():
 def click_at(x, y):
     ensure_click_helper()
     subprocess.run([CLICK_HELPER_BIN, str(int(x)), str(int(y))], check=True, timeout=5)
+
+
+def right_click_at(x, y):
+    ensure_click_helper()
+    subprocess.run([CLICK_HELPER_BIN, str(int(x)), str(int(y)), "right"], check=True, timeout=5)
 
 
 def select_contact_by_search(contact, bounds):

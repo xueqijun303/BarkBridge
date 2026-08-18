@@ -63,7 +63,15 @@ class NotifyService: NotificationListenerService() {
 
         val pushTitle = if (title.isBlank()) "微信消息" else "微信 - $title"
         val replyAllowed = RemoteReplyRegistry.capture(applicationContext, sbn, title, text) != null
-        ConversationMirror.recordIncoming(applicationContext, title.ifBlank { "微信" }, text)
+        val isVoice = isVoiceNotification(text)
+        val mirrorText = if (isVoice) "收到语音消息，等待 Mac 微信转文字" else text
+        ConversationMirror.recordIncoming(
+            applicationContext,
+            title.ifBlank { "微信" },
+            mirrorText,
+            mediaType = if (isVoice) "voice" else "",
+            requestTranscription = isVoice && AppSettings.voiceTranscriptionEnabled(applicationContext)
+        )
         val chatUrl = if (replyAllowed || !AppSettings.remoteReplyEnabled(applicationContext)) {
             ConversationMirror.chatUrl(applicationContext, title.ifBlank { "微信" })
         } else {
@@ -81,6 +89,16 @@ class NotifyService: NotificationListenerService() {
             "微信消息已推送"
         }
         LogStore.add(applicationContext, logText, category = "微信")
+    }
+
+    private fun isVoiceNotification(text: String): Boolean {
+        val normalized = text.trim()
+        if (normalized.isBlank()) return false
+        return normalized == "[语音]" ||
+            normalized == "语音" ||
+            normalized.contains("[语音]") ||
+            normalized.contains("语音消息") ||
+            normalized.contains("发来一条语音")
     }
 
     private fun handleOtherNotification(sbn: StatusBarNotification) {

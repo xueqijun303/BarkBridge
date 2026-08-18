@@ -59,6 +59,9 @@ object AppSettings {
     fun conversationMirrorEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "conversation_mirror_enabled", true)
     fun setConversationMirrorEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "conversation_mirror_enabled", value)
 
+    fun voiceTranscriptionEnabled(ctx: Context): Boolean = Prefs.getBool(ctx, "voice_transcription_enabled", true)
+    fun setVoiceTranscriptionEnabled(ctx: Context, value: Boolean) = Prefs.setBool(ctx, "voice_transcription_enabled", value)
+
     fun conversationIngestUrl(ctx: Context): String = Prefs.get(ctx, "conversation_ingest_url").ifBlank { DEFAULT_CHAT_INGEST }.trim()
     fun setConversationIngestUrl(ctx: Context, value: String) = Prefs.set(ctx, "conversation_ingest_url", value.trim())
 

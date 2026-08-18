@@ -1,8 +1,22 @@
-# BarkBridge v1.3.8
+# BarkBridge v1.3.9
 
 BarkBridge 是一款 Android 工具，可以把选定的微信通知和来电事件转发到 Bark。
 
 BarkBridge is an Android utility that forwards selected WeChat notifications and incoming-call events to Bark.
+
+## 当前状态 / Current Status
+
+- 当前稳定版本：`v1.3.9`。
+- Android 端已切换到阿里云自托管中继，默认地址为 `http://47.101.153.215:8787`。
+- iPhone 端统一使用 `/chat` 聊天/回复页面查看完整消息、选择联系人和提交回复。
+- Mac 端通过轮询中继服务接收回复指令，并使用 Mac 微信客户端代发。
+- 自托管中继已验证 `/chat`、`/settings`、`/control`、`/api/status` 和 `/health` 可用。
+
+- Current stable version: `v1.3.9`.
+- Android now uses the Aliyun self-hosted relay by default at `http://47.101.153.215:8787`.
+- iPhone uses the unified `/chat` page to view full messages, choose contacts, and submit replies.
+- Mac polls the relay service for reply commands and sends them through Mac WeChat.
+- The self-hosted relay has verified `/chat`, `/settings`, `/control`, `/api/status`, and `/health`.
 
 ## 功能 / Features
 
@@ -17,7 +31,12 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 微信白名单远程回复入口 / Remote reply entry for whitelisted WeChat contacts
 - Bark 回复链接和安卓轮询中转服务 / Bark reply links with Android-side relay polling
 - Mac 微信远程回复模式 / Mac WeChat remote reply mode
+- 统一聊天/回复页面 / Unified chat and reply page
 - 完整消息聊天面板 / Full-message chat panel
+- 聊天联系人搜索、置顶、隐藏 / Chat contact search, pinning, and hiding
+- 单联系人聊天记录清空 / Per-contact chat-history clearing
+- 每联系人最近 100 条自动保留 / Automatic per-contact retention for the latest 100 messages
+- 中继状态面板和健康检查 / Relay status dashboard and health check
 - 勿扰时段和重要消息例外 / Quiet hours with important-message exceptions
 - 自定义 Bark 服务器、分组、铃声、图标和通知级别 / Custom Bark server, group, sound, icon, and interruption level
 - 配置导入导出 / Configuration import and export
@@ -40,6 +59,24 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 支持本地属性或 GitHub Secrets 发布签名 / Optional release signing through local properties or GitHub Secrets
 
 ## 最新变化 / What's New
+
+### v1.3.9
+
+- Android Bark 通知统一跳转到 `/chat?secret=...&contact=...`，同一个页面即可查看上下文并提交回复。
+- 自托管中继聊天页新增联系人搜索、置顶/隐藏配置、`回到最新` 和 `清空当前联系人记录`。
+- 自托管中继新增 `/settings`、`/api/status` 和 `/health`，方便从手机管理联系人显示并查看 Android/Mac/队列状态。
+- 聊天记录改为每个联系人自动保留最近 100 条，全局最多保留 5000 条，避免长期使用后数据库过大。
+- Mac relay 发送失败回执增加目标、重试次数、失败原因和手动确认状态，发送排查更清楚。
+- 自托管安装脚本支持升级时停止旧服务和旧进程，避免 8787 端口被旧 relay 占用导致部署没生效。
+- GitHub Actions APK 产物名改为跟随当前 tag/版本自动生成。
+
+- Android Bark pushes now open `/chat?secret=...&contact=...`, so the same page can show context and submit replies.
+- The self-hosted chat page now includes contact search, pinned/hidden contact settings, "Back to latest", and per-contact history clearing.
+- The self-hosted relay adds `/settings`, `/api/status`, and `/health` for contact-display management and Android/Mac/queue status checks.
+- Chat history now keeps the latest 100 messages per contact and up to 5000 messages globally to keep the database bounded.
+- Mac relay failure receipts now include the target, retry count, failure reason, and manual-review state.
+- The self-hosted installer now stops old services/processes during upgrades so port 8787 is not left serving stale relay code.
+- GitHub Actions APK artifact names now follow the current tag/version automatically.
 
 ### v1.3.8
 
@@ -228,9 +265,9 @@ GitHub Actions 会生成以下 APK 产物名：
 GitHub Actions produces APK artifacts with these names:
 
 ```text
-BarkBridge_v1.3.8-debug.apk
-BarkBridge_v1.3.8-release.apk
-BarkBridge_v1.3.8-release-unsigned.apk
+BarkBridge_v1.3.9-debug.apk
+BarkBridge_v1.3.9-release.apk
+BarkBridge_v1.3.9-release-unsigned.apk
 ```
 
 Debug APK 可直接用于测试安装。未签名 release APK 需要签名后再公开分发；如果配置了签名 Secrets，Actions 会生成已签名 release APK。
@@ -266,9 +303,9 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## 息屏推送 / Screen-Off Delivery
 
-BarkBridge v1.3.8 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
+BarkBridge v1.3.9 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
 
-BarkBridge v1.3.8 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.3.9 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
 
 App 使用前台服务、通知监听重绑、唤醒锁、后台联网状态检测和失败补发队列，让 Bark 推送在息屏期间尽量保持可用。
 
@@ -303,16 +340,16 @@ Flow:
 - Android 监听微信 A 通知，并匹配联系人白名单。
 - Mac 模式下，BarkBridge 不要求 Android 微信通知带快捷回复按钮，也会生成短期有效 token。
 - Android 模式下，只有微信通知包含快捷回复动作时才会生成 token。
-- Bark 推送到 iPhone，并通过 Bark 的 `url` 参数附带回复页面链接。
-- iPhone 打开回复页面并提交回复内容到你的中转服务。
+- Bark 推送到 iPhone，并通过 Bark 的 `url` 参数打开统一聊天/回复页面。
+- iPhone 打开统一聊天/回复页面并提交回复内容到你的中转服务。
 - Mac 模式下，Mac 脚本轮询中转接口，拿到 contact 和 text 后操作 Mac 微信发送。
 - Android 模式下，Android 前台服务轮询中转接口，拿到 token 和 text 后调用微信通知快捷回复。
 
 - Android listens to WeChat A notifications and matches the contact allowlist.
 - In Mac mode, BarkBridge creates a short-lived token even if the Android WeChat notification does not expose quick reply.
 - In Android mode, a token is created only when the WeChat notification contains a quick-reply action.
-- Bark pushes to iPhone and includes the reply page through Bark's `url` parameter.
-- iPhone opens the reply page and submits the reply text to your relay service.
+- Bark pushes to iPhone and opens the unified chat/reply page through Bark's `url` parameter.
+- iPhone opens the unified chat/reply page and submits the reply text to your relay service.
 - In Mac mode, the Mac relay script polls the relay endpoint, receives contact and text, then sends through Mac WeChat.
 - In Android mode, the Android foreground service polls the relay endpoint, receives token and text, then sends through WeChat quick reply.
 
@@ -332,9 +369,22 @@ The relay polling endpoint may return one object, an array, or an object with a 
 {"replies":[{"id":"reply-001","token":"token-from-bark-link","text":"收到，我稍后处理"}]}
 ```
 
-仓库内提供了一个 Cloudflare Worker 示例：`relay/cloudflare-worker.js`。部署时绑定 Durable Object：`RELAY` -> `RelayRoom`，可选设置环境变量 `REPLY_SECRET`。App 中这样配置：
+当前推荐使用自托管中继的统一聊天页。仓库内仍保留 Cloudflare Worker 示例：`relay/cloudflare-worker.js`，适合不使用阿里云自托管时部署。部署 Worker 时绑定 Durable Object：`RELAY` -> `RelayRoom`，可选设置环境变量 `REPLY_SECRET`。
 
-A Cloudflare Worker sample is included at `relay/cloudflare-worker.js`. Bind a Durable Object as `RELAY` -> `RelayRoom`, and optionally set `REPLY_SECRET`. Configure the app like this:
+The recommended setup now uses the self-hosted relay's unified chat page. A Cloudflare Worker sample is still included at `relay/cloudflare-worker.js` for non-self-hosted deployments. Bind a Durable Object as `RELAY` -> `RelayRoom`, and optionally set `REPLY_SECRET`.
+
+推荐配置：
+
+Recommended configuration:
+
+```text
+iPhone 聊天面板 URL: http://47.101.153.215:8787/chat
+轮询取回复 URL: http://47.101.153.215:8787/poll?secret=your-secret
+```
+
+Cloudflare Worker 备选配置：
+
+Cloudflare Worker alternative:
 
 ```text
 iPhone 回复页面 URL: https://your-worker.example.workers.dev/reply
@@ -351,9 +401,18 @@ In Mac mode, if the Mac reply allowlist is empty, every WeChat notification alre
 
 ## 聊天面板 / Chat Panel
 
-聊天面板用于解决 Bark 通知预览显示不全的问题。Android 捕获到微信通知后，会把完整通知正文上传到 Worker 的 `/ingest`，iPhone 打开 `/chat?secret=...` 后可以按联系人查看完整往来内容，并从同一页面提交回复。
+聊天面板用于解决 Bark 通知预览显示不全的问题。Android 捕获到微信通知后，会把完整通知正文上传到中继服务的 `/ingest`，iPhone 打开 `/chat?secret=...&contact=...` 后可以按联系人查看完整往来内容，并从同一页面提交回复。
 
-The chat panel is designed for cases where Bark's notification preview truncates long text. When Android captures a WeChat notification, it uploads the full notification body to the Worker's `/ingest` endpoint. Open `/chat?secret=...` on iPhone to view full conversations by contact and submit replies from the same page.
+The chat panel is designed for cases where Bark's notification preview truncates long text. When Android captures a WeChat notification, it uploads the full notification body to the relay's `/ingest` endpoint. Open `/chat?secret=...&contact=...` on iPhone to view full conversations by contact and submit replies from the same page.
+
+聊天页支持：
+
+The chat page supports:
+
+- 联系人搜索、置顶和隐藏。 / Contact search, pinning, and hiding.
+- `回到最新`，用于长对话快速回到底部最新消息。 / `Back to latest` for jumping to the newest message in long conversations.
+- `清空当前联系人记录`，只清除当前联系人的云端聊天记录。 / Per-contact clearing that deletes only the selected contact's cloud-side chat history.
+- 每个联系人自动保留最近 100 条记录，全局最多保留 5000 条。 / Automatic retention of the latest 100 messages per contact and up to 5000 messages globally.
 
 App 中可配置：
 
@@ -369,15 +428,15 @@ iPhone 聊天面板 URL: http://47.101.153.215:8787/chat
 
 If the chat-panel secret is left empty, BarkBridge tries to reuse the `secret` query parameter from the remote reply page URL or poll URL.
 
-限制：聊天面板只保存 BarkBridge 启用后捕获到的通知正文和通过中转服务提交的回复；它不读取微信数据库，因此不会显示历史聊天记录，也不能补全微信没有放进通知里的内容。
+限制：聊天面板只保存 BarkBridge 启用后捕获到的通知正文和通过中转服务提交的回复；它不读取微信数据库，因此不会显示历史聊天记录，也不能补全微信没有放进通知里的内容。清空记录只影响 BarkBridge 中继数据库，不会删除微信里的原始聊天。
 
-Limitation: the chat panel only stores notification text captured after BarkBridge is enabled and replies submitted through the relay. It does not read the WeChat database, so it cannot import old chat history or recover content that WeChat did not include in the notification.
+Limitation: the chat panel only stores notification text captured after BarkBridge is enabled and replies submitted through the relay. It does not read the WeChat database, so it cannot import old chat history or recover content that WeChat did not include in the notification. Clearing history only affects the BarkBridge relay database; it does not delete the original WeChat conversation.
 
 ## 自托管中继 / Self-Hosted Relay
 
-如果 Android 手机直连 `workers.dev` 不稳定，可以把中继服务部署到自己的服务器。自托管版本保持 `/ingest`、`/chat`、`/send`、`/poll`、`/control` 等路径兼容，Android 和 Mac 只需要替换域名/IP。
+如果 Android 手机直连 `workers.dev` 不稳定，可以把中继服务部署到自己的服务器。自托管版本提供 `/ingest`、`/chat`、`/settings`、`/send`、`/poll`、`/control`、`/api/status` 和 `/health` 等路径，Android 和 Mac 只需要替换域名/IP。
 
-If Android cannot reliably reach `workers.dev`, deploy the relay on your own server. The self-hosted version keeps compatible paths such as `/ingest`, `/chat`, `/send`, `/poll`, and `/control`, so Android and Mac only need a URL change.
+If Android cannot reliably reach `workers.dev`, deploy the relay on your own server. The self-hosted version provides paths such as `/ingest`, `/chat`, `/settings`, `/send`, `/poll`, `/control`, `/api/status`, and `/health`, so Android and Mac only need a URL change.
 
 默认部署端口是 `8787`，不会占用常见的 `80`、`443` 或 `8001`：
 
@@ -398,6 +457,18 @@ iPhone 聊天面板 URL: http://47.101.153.215:8787/chat
 轮询取回复 URL: http://47.101.153.215:8787/poll?secret=your-secret
 ```
 
+常用页面：
+
+Useful pages:
+
+```text
+聊天/回复页面: http://47.101.153.215:8787/chat?secret=your-secret
+联系人显示设置: http://47.101.153.215:8787/settings?secret=your-secret
+运行状态面板: http://47.101.153.215:8787/control?secret=your-secret
+健康检查接口: http://47.101.153.215:8787/health
+状态 JSON 接口: http://47.101.153.215:8787/api/status?secret=your-secret
+```
+
 如果服务器启用了防火墙或云安全组，需要放行 TCP `8787`。如果之后绑定域名和 HTTPS，只需要把上面的 `http://your-server-ip:8787` 换成新的 HTTPS 地址。
 
 If the server firewall or cloud security group is enabled, allow TCP `8787`. If you later bind a domain and HTTPS, replace `http://your-server-ip:8787` with the new HTTPS base URL.
@@ -408,7 +479,7 @@ Mac WeChat remote reply:
 
 ```sh
 python3 tools/mac-wechat-relay.py \
-  --poll-url 'https://your-worker.example.workers.dev/poll?secret=your-secret' \
+  --poll-url 'http://47.101.153.215:8787/poll?secret=your-secret' \
   --interval 1
 ```
 
@@ -438,7 +509,7 @@ To send Bark receipts after Mac send success or failure, pass a full Bark endpoi
 
 ```sh
 python3 tools/mac-wechat-relay.py \
-  --poll-url 'https://your-worker.example.workers.dev/poll?secret=your-secret' \
+  --poll-url 'http://47.101.153.215:8787/poll?secret=your-secret' \
   --receipt-url 'https://api.day.app/your-bark-key'
 ```
 
@@ -533,6 +604,6 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-推送类似 `v1.3.8` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
+推送类似 `v1.3.9` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
 
-Pushing a tag such as `v1.3.8` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.3.9` builds APKs and publishes them to the GitHub Release page automatically.

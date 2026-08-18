@@ -49,6 +49,8 @@ DEFAULT_CONFIG = {
     "pinnedContacts": ["XQJ家庭群", "幸福一家人", "薛启军工作号"],
     "hiddenContacts": sorted(HIDDEN_CONTACTS),
 }
+HISTORY_RETAIN_PER_CONTACT = 100
+HISTORY_RETAIN_TOTAL = 5000
 
 
 def is_hidden_contact(contact):
@@ -140,7 +142,15 @@ class RelayStore:
                     int(item.get("createdAt") or now_ms()),
                 ),
             )
-            rows = db.execute("select id from history order by created_at desc limit -1 offset 300").fetchall()
+            contact = str(item.get("contact", "")).strip()
+            if contact:
+                rows = db.execute(
+                    "select id from history where contact = ? order by created_at desc limit -1 offset ?",
+                    (contact, HISTORY_RETAIN_PER_CONTACT),
+                ).fetchall()
+                if rows:
+                    db.executemany("delete from history where id = ?", rows)
+            rows = db.execute("select id from history order by created_at desc limit -1 offset ?", (HISTORY_RETAIN_TOTAL,)).fetchall()
             if rows:
                 db.executemany("delete from history where id = ?", rows)
 
@@ -233,6 +243,51 @@ class RelayStore:
             cursor = db.execute("delete from history where contact = ?", (contact,))
             return cursor.rowcount
 
+    def queue_count(self):
+        with self.connect() as db:
+            row = db.execute("select count(*) from queue").fetchone()
+        return int(row[0] if row else 0)
+
+    def latest_history_time(self, source=None):
+        sql = "select max(created_at) from history"
+        args = ()
+        if source:
+            sql += " where source = ?"
+            args = (source,)
+        with self.connect() as db:
+            row = db.execute(sql, args).fetchone()
+        return int(row[0] or 0) if row else 0
+
+    def set_meta(self, key, value):
+        with self.lock, self.connect() as db:
+            db.execute(
+                "insert or replace into config (key, value) values (?, ?)",
+                (f"meta:{key}", json.dumps(value, ensure_ascii=False)),
+            )
+
+    def get_meta(self, key, default=None):
+        with self.connect() as db:
+            row = db.execute("select value from config where key = ?", (f"meta:{key}",)).fetchone()
+        if not row:
+            return default
+        try:
+            return json.loads(row[0])
+        except Exception:
+            return row[0]
+
+    def status(self):
+        return {
+            "ok": True,
+            "time": now_ms(),
+            "queueCount": self.queue_count(),
+            "contactCount": len(self.contacts()),
+            "historyLimitPerContact": HISTORY_RETAIN_PER_CONTACT,
+            "historyLimitTotal": HISTORY_RETAIN_TOTAL,
+            "androidLastUploadAt": self.latest_history_time("android"),
+            "outgoingLastQueuedAt": self.latest_history_time("compose") or self.latest_history_time("reply"),
+            "macLastPollAt": int(self.get_meta("macLastPollAt", 0) or 0),
+        }
+
     def config(self):
         with self.connect() as db:
             rows = db.execute("select key, value from config").fetchall()
@@ -310,7 +365,7 @@ class RelayHandler(BaseHTTPRequestHandler):
     server_version = "BarkBridgeRelay/1.0"
 
     def do_HEAD(self):
-        if self.path_only() in {"/", "/reply", "/compose", "/control", "/chat", "/settings", "/health"}:
+        if self.path_only() in {"/", "/reply", "/compose", "/control", "/chat", "/settings", "/health", "/api/status"}:
             self.send_response(200)
             content_type = "application/json; charset=utf-8" if self.path_only() == "/health" else "text/html; charset=utf-8"
             self.send_header("Content-Type", content_type)
@@ -322,7 +377,7 @@ class RelayHandler(BaseHTTPRequestHandler):
         path = self.path_only()
         query = self.query()
         if path == "/health":
-            self.json({"ok": True, "time": now_ms()})
+            self.json(self.server.store.status())
         elif path == "/":
             self.html(home_page())
         elif path == "/reply":
@@ -373,10 +428,16 @@ class RelayHandler(BaseHTTPRequestHandler):
                 self.json({"config": {}}, 403)
             else:
                 self.json({"config": self.server.store.config(), "contacts": self.server.store.contacts()})
+        elif path == "/api/status":
+            if not self.allowed(query.get("secret", [""])[0]):
+                self.json({"ok": False, "error": "密钥不正确"}, 403)
+            else:
+                self.json(self.server.store.status())
         elif path == "/poll":
             if not self.allowed(query.get("secret", [""])[0]):
                 self.json({"replies": []}, 403)
             else:
+                self.server.store.set_meta("macLastPollAt", now_ms())
                 wait_ms = int(query.get("waitMs", ["25000"])[0] or "25000")
                 wait_ms = max(0, min(25000, wait_ms))
                 self.json({"replies": self.server.store.dequeue(wait_ms)})
@@ -582,7 +643,7 @@ def home_page():
 
 
 def control_page(secret):
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BarkBridge Control</title><style>{BASE_CSS}</style></head><body><main><h1>BarkBridge Control</h1><p class="message">这些指令会进入中转队列，由 Mac relay 下一次轮询后执行。</p><form method="post" action="/control"><input type="hidden" name="secret" value="{esc(secret)}"><button name="action" value="pause">暂停 Mac relay</button><button name="action" value="resume">恢复 Mac relay</button><button name="action" value="auto_send_on">开启自动发送</button><button name="action" value="auto_send_off">关闭自动发送</button><button name="action" value="manual_only_on">开启仅手动模式</button><button name="action" value="manual_only_off">关闭仅手动模式</button></form></main></body></html>"""
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BarkBridge Control</title><style>{CONTROL_CSS}</style></head><body><main><header><h1>BarkBridge Control</h1><a href="/chat?secret={esc(secret)}">返回聊天</a></header><section class="grid" id="status"></section><p class="message">这些指令会进入中转队列，由 Mac relay 下一次轮询后执行。</p><form method="post" action="/control"><input type="hidden" name="secret" value="{esc(secret)}"><button name="action" value="pause">暂停 Mac relay</button><button name="action" value="resume">恢复 Mac relay</button><button name="action" value="auto_send_on">开启自动发送</button><button name="action" value="auto_send_off">关闭自动发送</button><button name="action" value="manual_only_on">开启仅手动模式</button><button name="action" value="manual_only_off">关闭仅手动模式</button></form></main><script>const secret={json.dumps(secret)};{CONTROL_JS}</script></body></html>"""
 
 
 def settings_page(secret):
@@ -612,7 +673,7 @@ def compose_like_page(title, mode, secret, token, selected):
 
 
 def chat_page(secret, selected):
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Chat</title><style>{CHAT_CSS}</style></head><body><div class="app"><header><div class="topbar"><h1 id="title">BarkBridge Chat</h1><a class="settings" href="/settings?secret={esc(secret)}">设置</a></div><input id="search" class="search" placeholder="搜索联系人"><div class="hint">只显示 BarkBridge 启用后经手的完整消息</div></header><nav class="contacts" id="contacts"></nav><div class="chat-tools"><button id="clearChat" class="ghost" type="button">清空当前联系人记录</button></div><main class="messages" id="messages"></main><form id="form"><textarea id="text" placeholder="输入回复内容"></textarea><button class="send" type="submit">发送</button></form></div><script>const secret={json.dumps(secret)};let selected={json.dumps(selected)};{CHAT_JS}</script></body></html>"""
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Chat</title><style>{CHAT_CSS}</style></head><body><div class="app"><header><div class="topbar"><h1 id="title">BarkBridge Chat</h1><a class="settings" href="/settings?secret={esc(secret)}">设置</a></div><input id="search" class="search" placeholder="搜索联系人"><div class="hint">只显示 BarkBridge 启用后经手的完整消息</div></header><nav class="contacts" id="contacts"></nav><div class="chat-tools"><button id="latestChat" class="ghost primary" type="button">回到最新</button><button id="clearChat" class="ghost" type="button">清空当前联系人记录</button></div><main class="messages" id="messages"></main><form id="form"><textarea id="text" placeholder="输入回复内容"></textarea><button class="send" type="submit">发送</button></form></div><script>const secret={json.dumps(secret)};let selected={json.dumps(selected)};{CHAT_JS}</script></body></html>"""
 
 
 BASE_CSS = """
@@ -620,6 +681,24 @@ body{margin:0;background:#f3f7f6;color:#17201f;font-family:-apple-system,BlinkMa
 main{max-width:560px;margin:0 auto;padding:28px 18px}
 h1{font-size:24px;margin:0 0 14px}.message{padding:14px;border:1px solid #d5e4e1;background:#fff;border-radius:8px;line-height:1.5}
 button{width:100%;height:48px;margin-top:12px;border:0;border-radius:8px;background:#007670;color:#fff;font-family:inherit;font-size:16px;font-weight:600}
+"""
+
+
+CONTROL_CSS = """
+body{margin:0;background:#f3f7f6;color:#17201f;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:680px;margin:0 auto;padding:28px 18px}header{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}h1{font-size:24px;margin:0}a{color:#007670;font-weight:800;text-decoration:none}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}.metric{border:1px solid #d5e4e1;background:#fff;border-radius:8px;padding:12px}.metric strong{display:block;font-size:13px;color:#667370;margin-bottom:6px}.metric span{font-size:17px;font-weight:800;overflow-wrap:anywhere}
+.message{padding:14px;border:1px solid #d5e4e1;background:#fff;border-radius:8px;line-height:1.5}button{width:100%;height:48px;margin-top:12px;border:0;border-radius:8px;background:#007670;color:#fff;font-family:inherit;font-size:16px;font-weight:600}
+@media(max-width:520px){.grid{grid-template-columns:1fr}}
+"""
+
+
+CONTROL_JS = r"""
+const statusEl=document.getElementById("status");
+function fmt(ts){if(!ts)return "-";const d=new Date(ts);return String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0")}
+function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+async function loadStatus(){const r=await fetch("/api/status?secret="+encodeURIComponent(secret),{cache:"no-store"});const s=await r.json();const rows=[["服务时间",fmt(s.time)],["待发送队列",s.queueCount],["Android最后上传",fmt(s.androidLastUploadAt)],["Mac最后轮询",fmt(s.macLastPollAt)],["最近发送入队",fmt(s.outgoingLastQueuedAt)],["联系人数量",s.contactCount],["单联系人保留",s.historyLimitPerContact+" 条"],["总记录上限",s.historyLimitTotal+" 条"]];statusEl.innerHTML=rows.map(([k,v])=>'<div class="metric"><strong>'+esc(k)+'</strong><span>'+esc(v)+'</span></div>').join("")}
+loadStatus();setInterval(loadStatus,5000);
 """
 
 
@@ -631,7 +710,7 @@ header{z-index:2;background:var(--panel);border-bottom:1px solid var(--line);pad
 h1{margin:0;font-size:21px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hint{color:var(--muted);font-size:13px;margin-top:4px}
 .topbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center}.settings{color:var(--green);font-size:15px;font-weight:800;text-decoration:none}.ghost{height:38px;border:1px solid #46505a;border-radius:8px;background:#2a2d31;color:var(--text);font:15px inherit;font-weight:800;padding:0 12px}.search{width:100%;height:42px;margin-top:10px;border:1px solid var(--line);border-radius:8px;background:#2a2d31;color:var(--text);font:17px inherit;padding:0 12px}
 .contacts{display:flex;gap:8px;overflow:auto;padding:10px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
-.chat-tools{display:grid;background:var(--panel);border-bottom:1px solid var(--line);padding:8px 12px}.chat-tools .ghost{width:100%}
+.chat-tools{display:grid;grid-template-columns:112px 1fr;gap:8px;background:var(--panel);border-bottom:1px solid var(--line);padding:8px 12px}.chat-tools .ghost{width:100%}.ghost.primary{background:var(--green);border-color:var(--green);color:#03150a}
 .contact{white-space:nowrap;border:1px solid var(--line);border-radius:999px;background:#2a2d31;color:var(--text);padding:8px 12px;font:15px inherit}.contact.active{background:var(--green);color:#03150a;border-color:var(--green);font-weight:800}
 .messages{min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;padding:14px 12px 14px;display:flex;flex-direction:column;gap:10px}.msg{max-width:88%;display:grid;gap:4px}.msg.in{align-self:flex-start}.msg.out{align-self:flex-end}.bottom-anchor{height:1px;min-height:1px}
 .bubble{border-radius:8px;padding:10px 12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:18px}.in .bubble{background:var(--in)}.out .bubble{background:var(--out);color:#03150a}.meta{color:var(--muted);font-size:12px}.out .meta{text-align:right}
@@ -642,7 +721,7 @@ textarea{height:72px;resize:none;border:1px solid var(--line);border-radius:8px;
 
 
 CHAT_JS = r"""
-let history=[],contacts=[],initialLoad=true;const contactsEl=document.getElementById("contacts"),messagesEl=document.getElementById("messages"),titleEl=document.getElementById("title"),textEl=document.getElementById("text"),searchEl=document.getElementById("search"),clearChatEl=document.getElementById("clearChat");
+let history=[],contacts=[],initialLoad=true;const contactsEl=document.getElementById("contacts"),messagesEl=document.getElementById("messages"),titleEl=document.getElementById("title"),textEl=document.getElementById("text"),searchEl=document.getElementById("search"),clearChatEl=document.getElementById("clearChat"),latestChatEl=document.getElementById("latestChat");
 function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}function fmt(t){const d=new Date(t||Date.now());return String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")}
 function nearBottom(){return messagesEl.scrollHeight-messagesEl.scrollTop-messagesEl.clientHeight<120}
 function scrollToBottom(force=false){if(!force&&!nearBottom())return;const run=()=>{const last=messagesEl.querySelector("[data-last='1']");if(last)last.scrollIntoView({block:"end",inline:"nearest"});messagesEl.scrollTop=messagesEl.scrollHeight};requestAnimationFrame(()=>{run();[50,120,250,500,900,1400].forEach(ms=>setTimeout(run,ms))})}
@@ -650,7 +729,7 @@ async function load(options={}){const shouldStick=initialLoad||options.forceScro
 function renderContacts(){const q=(searchEl.value||"").trim().toLowerCase();const visible=contacts.filter(c=>!q||c.toLowerCase().includes(q));contactsEl.innerHTML=visible.map(c=>'<button type="button" class="contact '+(c===selected?'active':'')+'" data-contact="'+esc(c)+'">'+esc(c)+'</button>').join("");contactsEl.querySelectorAll(".contact").forEach(b=>b.onclick=()=>{selected=b.dataset.contact;renderContacts();render(true)})}
 function render(stick=false){titleEl.textContent=selected||"BarkBridge Chat";contactsEl.querySelectorAll(".contact").forEach(b=>b.classList.toggle("active",b.dataset.contact===selected));clearChatEl.disabled=!selected;const items=history.filter(i=>!selected||i.contact===selected).reverse();messagesEl.innerHTML=(items.map((i,idx)=>'<article class="msg '+(i.direction==="incoming"?'in':'out')+'" '+(idx===items.length-1?'data-last="1"':'')+'><div class="bubble">'+esc(i.text||"")+'</div><div class="meta">'+esc(i.contact||"")+' · '+esc(i.status||"")+' · '+fmt(i.createdAt)+'</div></article>').join("")||'<div class="hint" data-last="1">暂无消息</div>')+'<div class="bottom-anchor"></div>';scrollToBottom(stick)}
 async function clearCurrentChat(){if(!selected)return;if(!confirm("只清除「"+selected+"」的聊天记录？"))return;clearChatEl.disabled=true;const r=await fetch("/api/chat/clear",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({secret,contact:selected})});if(!r.ok)alert("清除失败");await load({forceScroll:true});clearChatEl.disabled=false}
-searchEl.oninput=renderContacts;clearChatEl.onclick=clearCurrentChat;if(window.visualViewport)visualViewport.addEventListener("resize",()=>scrollToBottom(true));window.addEventListener("orientationchange",()=>setTimeout(()=>scrollToBottom(true),300));window.addEventListener("pageshow",()=>scrollToBottom(true));document.getElementById("form").onsubmit=async e=>{e.preventDefault();const text=textEl.value.trim();if(!selected||!text)return;const form=new FormData();form.set("secret",secret);form.set("contact",selected);form.set("text",text);const r=await fetch("/send",{method:"POST",body:form});if(!r.ok)alert("提交失败");else{textEl.value="";await load({forceScroll:true})}};load({forceScroll:true});setInterval(()=>load(),5000);
+searchEl.oninput=renderContacts;clearChatEl.onclick=clearCurrentChat;latestChatEl.onclick=()=>scrollToBottom(true);if(window.visualViewport)visualViewport.addEventListener("resize",()=>scrollToBottom(true));window.addEventListener("orientationchange",()=>setTimeout(()=>scrollToBottom(true),300));window.addEventListener("pageshow",()=>scrollToBottom(true));document.getElementById("form").onsubmit=async e=>{e.preventDefault();const text=textEl.value.trim();if(!selected||!text)return;const form=new FormData();form.set("secret",secret);form.set("contact",selected);form.set("text",text);const r=await fetch("/send",{method:"POST",body:form});if(!r.ok)alert("提交失败");else{textEl.value="";await load({forceScroll:true})}};load({forceScroll:true});setInterval(()=>load(),5000);
 """
 
 

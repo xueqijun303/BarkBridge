@@ -1160,16 +1160,29 @@ def transcribe_latest_voice(contact, rule=None):
     select_contact_by_search(contact, bounds)
     actual_title = verify_selected_chat(contact, "语音转文字", bounds, rule or {})
     before = read_chat_body_text(bounds)
-    trigger_voice_to_text(bounds)
-    time.sleep(3.0)
-    after = read_chat_body_text(bounds)
-    text = extract_transcription(before, after)
+    text = click_visible_voice_to_text(bounds, before)
     if not text:
-        raise RuntimeError("未识别到微信转出的文字，可能没有点中语音消息或当前 Mac 微信未显示转文字菜单")
+        trigger_voice_context_menu(bounds)
+        text = wait_for_transcription(before, bounds, timeout_seconds=8)
+    if not text:
+        raise RuntimeError("未识别到微信转出的文字，可能没有点中语音消息或当前 Mac 微信未完成转文字")
     return {"actual_title": actual_title, "text": text}
 
 
-def trigger_voice_to_text(bounds):
+def click_visible_voice_to_text(bounds, before_lines):
+    candidates = []
+    for y_offset in (190, 205, 175, 220):
+        for x_offset in (510, 540, 480, 570):
+            candidates.append((bounds["left"] + x_offset, bounds["top"] + bounds["height"] - y_offset))
+    for x, y in candidates:
+        click_at(x, y)
+        text = wait_for_transcription(before_lines, bounds, timeout_seconds=4)
+        if text:
+            return text
+    return ""
+
+
+def trigger_voice_context_menu(bounds):
     x = bounds["left"] + min(430, max(300, bounds["width"] * 0.34))
     candidate_ys = [
         bounds["top"] + bounds["height"] - 170,
@@ -1187,6 +1200,17 @@ def trigger_voice_to_text(bounds):
     if last_error:
         raise RuntimeError(f"无法打开语音转文字菜单: {last_error}") from last_error
     raise RuntimeError("没有找到微信语音转文字菜单项")
+
+
+def wait_for_transcription(before_lines, bounds, timeout_seconds):
+    deadline = time.time() + max(1, timeout_seconds)
+    while time.time() < deadline:
+        time.sleep(1.0)
+        after = read_chat_body_text(bounds)
+        text = extract_transcription(before_lines, after)
+        if text:
+            return text
+    return ""
 
 
 def click_voice_to_text_menu_item():

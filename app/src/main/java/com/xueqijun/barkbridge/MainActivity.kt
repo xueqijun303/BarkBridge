@@ -680,9 +680,9 @@ class MainActivity : Activity() {
     private fun appVersionName(): String {
         return try {
             val info: PackageInfo = packageManager.getPackageInfo(packageName, 0)
-            info.versionName ?: "1.3.10"
+            info.versionName ?: "1.3.11"
         } catch (e: Exception) {
-            "1.3.10"
+            "1.3.11"
         }
     }
 

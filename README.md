@@ -1,4 +1,4 @@
-# BarkBridge v1.3.10
+# BarkBridge v1.3.11
 
 BarkBridge 是一款 Android 工具，可以把选定的微信通知和来电事件转发到 Bark。
 
@@ -6,13 +6,13 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 
 ## 当前状态 / Current Status
 
-- 当前稳定版本：`v1.3.10`。
+- 当前稳定版本：`v1.3.11`。
 - Android 端已切换到阿里云自托管中继，默认地址为 `http://47.101.153.215:8787`。
 - iPhone 端统一使用 `/chat` 聊天/回复页面查看完整消息、选择联系人和提交回复。
 - Mac 端通过轮询中继服务接收回复指令，并使用 Mac 微信客户端代发。
 - 自托管中继已验证 `/chat`、`/settings`、`/control`、`/api/status` 和 `/health` 可用。
 
-- Current stable version: `v1.3.10`.
+- Current stable version: `v1.3.11`.
 - Android now uses the Aliyun self-hosted relay by default at `http://47.101.153.215:8787`.
 - iPhone uses the unified `/chat` page to view full messages, choose contacts, and submit replies.
 - Mac polls the relay service for reply commands and sends them through Mac WeChat.
@@ -60,6 +60,14 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 支持本地属性或 GitHub Secrets 发布签名 / Optional release signing through local properties or GitHub Secrets
 
 ## 最新变化 / What's New
+
+### v1.3.11
+
+- 修正 Mac 微信语音转文字实验功能的点击策略：优先点击聊天窗口中可见的“转文字”按钮，并等待实际转写结果。
+- 避免连续点击多个候选点导致误选消息或混入 OCR 噪声。
+
+- Fixed the experimental Mac WeChat voice-to-text click strategy: the relay now prioritizes the visible "转文字" button and waits for the actual transcription result.
+- Avoids clicking multiple candidate points in a row, which could select messages or mix UI noise into OCR output.
 
 ### v1.3.10
 
@@ -280,9 +288,9 @@ GitHub Actions 会生成以下 APK 产物名：
 GitHub Actions produces APK artifacts with these names:
 
 ```text
-BarkBridge_v1.3.10-debug.apk
-BarkBridge_v1.3.10-release.apk
-BarkBridge_v1.3.10-release-unsigned.apk
+BarkBridge_v1.3.11-debug.apk
+BarkBridge_v1.3.11-release.apk
+BarkBridge_v1.3.11-release-unsigned.apk
 ```
 
 Debug APK 可直接用于测试安装。未签名 release APK 需要签名后再公开分发；如果配置了签名 Secrets，Actions 会生成已签名 release APK。
@@ -318,9 +326,9 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## 息屏推送 / Screen-Off Delivery
 
-BarkBridge v1.3.10 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
+BarkBridge v1.3.11 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
 
-BarkBridge v1.3.10 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.3.11 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
 
 App 使用前台服务、通知监听重绑、唤醒锁、后台联网状态检测和失败补发队列，让 Bark 推送在息屏期间尽量保持可用。
 
@@ -620,6 +628,6 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-推送类似 `v1.3.10` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
+推送类似 `v1.3.11` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
 
-Pushing a tag such as `v1.3.10` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.3.11` builds APKs and publishes them to the GitHub Release page automatically.

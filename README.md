@@ -61,6 +61,14 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 
 ## 最新变化 / What's New
 
+### Mac relay update
+
+- 微信语音转文字链路已实测跑通：Android 识别语音通知，自托管中继生成任务，Mac relay 点击 Mac 微信“转文字”，并把结果回写聊天面板。
+- Mac relay 新增 OCR 噪声过滤，避免把语音时长、符号和微信界面文字混入转写结果。
+
+- The WeChat voice-to-text path has been verified end to end: Android detects the voice notification, the self-hosted relay queues the task, Mac relay clicks WeChat's "转文字" action, and the result is written back to the chat panel.
+- Mac relay now filters OCR noise so voice durations, symbols, and WeChat UI text are not mixed into the transcription result.
+
 ### v1.3.12
 
 - 聊天面板上传失败时，Android 日志会显示服务器返回的错误内容，方便区分 403 密钥错误和其他网络问题。

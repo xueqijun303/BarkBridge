@@ -6,6 +6,7 @@ import http.client
 import http.server
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -1274,13 +1275,36 @@ def read_chat_body_text(bounds):
 def extract_transcription(before_lines, after_lines):
     before = {normalize_match_text(line) for line in before_lines}
     added = [
-        line for line in after_lines
-        if normalize_match_text(line) and normalize_match_text(line) not in before and not is_wechat_ui_text(line)
+        sanitize_transcription_line(line) for line in after_lines
+        if is_transcription_line(line) and normalize_match_text(line) not in before
     ]
     if added:
         return "\n".join(added[-4:]).strip()
-    filtered = [line for line in after_lines if not is_wechat_ui_text(line)]
+    filtered = [sanitize_transcription_line(line) for line in after_lines if is_transcription_line(line)]
     return "\n".join(filtered[-4:]).strip()
+
+
+def sanitize_transcription_line(text):
+    text = str(text or "").strip()
+    text = re.sub(r"^[0-9oO小少\"'”“’‘、,，.。:：;；()（）\\s]+", "", text)
+    text = re.sub(r"([。！？?])[,，.。]+$", r"\1", text)
+    return text.strip()
+
+
+def is_transcription_line(text):
+    text = str(text or "").strip()
+    if is_wechat_ui_text(text):
+        return False
+    compact = normalize_match_text(text)
+    if len(compact) < 3:
+        return False
+    if re.fullmatch(r"[0-9oO小少]+[\"'”“’‘、,，.。:：;；()（）\\s]*", text):
+        return False
+    if not re.search(r"[\u4e00-\u9fffA-Za-z]", text):
+        return False
+    if re.fullmatch(r"[\W_0-9A-Za-z]{1,8}", text):
+        return False
+    return True
 
 
 def is_wechat_ui_text(text):
@@ -1289,7 +1313,8 @@ def is_wechat_ui_text(text):
         return True
     ui_words = [
         "发送", "聊天", "通讯录", "收藏", "搜索", "微信", "文件传输助手",
-        "按住说话", "输入", "表情", "截图", "更多",
+        "按住说话", "输入", "表情", "截图", "更多", "转文字",
+        "逐条转发", "合并转发", "保存至电脑", "删除", "复制", "翻译",
     ]
     return any(normalize_match_text(word) == compact for word in ui_words)
 

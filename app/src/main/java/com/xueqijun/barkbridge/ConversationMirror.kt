@@ -37,11 +37,17 @@ object ConversationMirror {
                 conn.readTimeout = 10000
                 conn.doOutput = true
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                conn.setRequestProperty("User-Agent", "BarkBridge/1.3.11 Android")
+                conn.setRequestProperty("User-Agent", "BarkBridge/1.3.12 Android")
                 conn.outputStream.use { it.write(body) }
                 val code = conn.responseCode
                 if (code !in 200..299) {
-                    LogStore.add(ctx, "聊天面板上传失败: HTTP $code", category = "聊天")
+                    val detail = try {
+                        (conn.errorStream ?: conn.inputStream)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                    } catch (e: Exception) {
+                        ""
+                    }
+                    val suffix = if (detail.isBlank()) "" else " ${detail.take(80)}"
+                    LogStore.add(ctx, "聊天面板上传失败: HTTP $code$suffix", category = "聊天")
                 } else {
                     LogStore.add(ctx, "聊天面板已上传: $contact", category = "聊天")
                 }
@@ -63,6 +69,8 @@ object ConversationMirror {
 
     private fun relaySecret(ctx: Context): String {
         return AppSettings.conversationRelaySecret(ctx)
+            .ifBlank { queryParam(AppSettings.conversationChatPageUrl(ctx), "secret") }
+            .ifBlank { queryParam(AppSettings.conversationIngestUrl(ctx), "secret") }
             .ifBlank { queryParam(AppSettings.remoteReplyPageUrl(ctx), "secret") }
             .ifBlank { queryParam(AppSettings.remoteReplyPollUrl(ctx), "secret") }
     }

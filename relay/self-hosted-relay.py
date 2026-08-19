@@ -466,7 +466,8 @@ class RelayHandler(BaseHTTPRequestHandler):
 
     def save_incoming(self):
         data = self.read_json()
-        if not self.allowed(str(data.get("secret", ""))):
+        secret = str(data.get("secret", "")).strip() or self.query().get("secret", [""])[0]
+        if not self.allowed(secret):
             self.json({"ok": False, "error": "密钥不正确"}, 403)
             return
         contact = str(data.get("contact", "")).strip()

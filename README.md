@@ -1,4 +1,4 @@
-# BarkBridge v1.3.11
+# BarkBridge v1.3.12
 
 BarkBridge 是一款 Android 工具，可以把选定的微信通知和来电事件转发到 Bark。
 
@@ -6,13 +6,13 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 
 ## 当前状态 / Current Status
 
-- 当前稳定版本：`v1.3.11`。
+- 当前稳定版本：`v1.3.12`。
 - Android 端已切换到阿里云自托管中继，默认地址为 `http://47.101.153.215:8787`。
 - iPhone 端统一使用 `/chat` 聊天/回复页面查看完整消息、选择联系人和提交回复。
 - Mac 端通过轮询中继服务接收回复指令，并使用 Mac 微信客户端代发。
 - 自托管中继已验证 `/chat`、`/settings`、`/control`、`/api/status` 和 `/health` 可用。
 
-- Current stable version: `v1.3.11`.
+- Current stable version: `v1.3.12`.
 - Android now uses the Aliyun self-hosted relay by default at `http://47.101.153.215:8787`.
 - iPhone uses the unified `/chat` page to view full messages, choose contacts, and submit replies.
 - Mac polls the relay service for reply commands and sends them through Mac WeChat.
@@ -60,6 +60,16 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 支持本地属性或 GitHub Secrets 发布签名 / Optional release signing through local properties or GitHub Secrets
 
 ## 最新变化 / What's New
+
+### v1.3.12
+
+- 聊天面板上传失败时，Android 日志会显示服务器返回的错误内容，方便区分 403 密钥错误和其他网络问题。
+- Android 自动复用 relay secret 的范围扩大到“iPhone 聊天面板 URL”和“聊天记录上传 URL”。
+- 自托管中继 `/ingest` 支持从 URL query 读取 `secret`，降低配置错误概率。
+
+- Android now logs the relay error body when chat-panel upload fails, making 403 secret errors easier to diagnose.
+- Android can now reuse the relay secret from the iPhone chat page URL or conversation ingest URL.
+- The self-hosted relay `/ingest` endpoint can also read `secret` from the URL query string.
 
 ### v1.3.11
 
@@ -288,9 +298,9 @@ GitHub Actions 会生成以下 APK 产物名：
 GitHub Actions produces APK artifacts with these names:
 
 ```text
-BarkBridge_v1.3.11-debug.apk
-BarkBridge_v1.3.11-release.apk
-BarkBridge_v1.3.11-release-unsigned.apk
+BarkBridge_v1.3.12-debug.apk
+BarkBridge_v1.3.12-release.apk
+BarkBridge_v1.3.12-release-unsigned.apk
 ```
 
 Debug APK 可直接用于测试安装。未签名 release APK 需要签名后再公开分发；如果配置了签名 Secrets，Actions 会生成已签名 release APK。
@@ -326,9 +336,9 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## 息屏推送 / Screen-Off Delivery
 
-BarkBridge v1.3.11 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
+BarkBridge v1.3.12 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
 
-BarkBridge v1.3.11 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.3.12 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
 
 App 使用前台服务、通知监听重绑、唤醒锁、后台联网状态检测和失败补发队列，让 Bark 推送在息屏期间尽量保持可用。
 
@@ -628,6 +638,6 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-推送类似 `v1.3.11` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
+推送类似 `v1.3.12` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
 
-Pushing a tag such as `v1.3.11` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.3.12` builds APKs and publishes them to the GitHub Release page automatically.

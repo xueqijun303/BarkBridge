@@ -186,6 +186,32 @@ class RelayStore:
                     ),
                 )
 
+    def replace_voice_task(self, item):
+        with self.lock, self.connect() as db:
+            db.execute(
+                "delete from queue where contact = ? and source = 'voice' and action = 'voice_transcribe'",
+                (item.get("contact", ""),),
+            )
+            db.execute(
+                """
+                insert or replace into queue
+                (id, token, contact, text, source, action, value, direction, status, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item["id"],
+                    item.get("token", ""),
+                    item.get("contact", ""),
+                    item.get("text", ""),
+                    item.get("source", ""),
+                    item.get("action", ""),
+                    str(item.get("value", "")),
+                    item.get("direction", ""),
+                    item.get("status", ""),
+                    int(item.get("createdAt") or now_ms()),
+                ),
+            )
+
     def dequeue(self, wait_ms):
         with self.lock:
             items = self.pop_queue_locked()
@@ -510,7 +536,7 @@ class RelayHandler(BaseHTTPRequestHandler):
             }
         )
         if media_type == "voice" and request_transcription:
-            self.server.store.enqueue_task(
+            self.server.store.replace_voice_task(
                 {
                     "id": make_id(),
                     "token": "voice",

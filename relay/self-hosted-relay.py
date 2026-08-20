@@ -51,6 +51,7 @@ DEFAULT_CONFIG = {
 }
 HISTORY_RETAIN_PER_CONTACT = 100
 HISTORY_RETAIN_TOTAL = 5000
+VOICE_TASK_DEDUPE_MS = 1200
 
 
 def is_hidden_contact(contact):
@@ -260,6 +261,20 @@ class RelayStore:
         with self.connect() as db:
             row = db.execute(sql, args).fetchone()
         return int(row[0] or 0) if row else 0
+
+    def recent_voice_pending_exists(self, contact, created_at):
+        with self.connect() as db:
+            row = db.execute(
+                """
+                select 1 from history
+                where contact = ?
+                  and status = 'voice-pending'
+                  and abs(created_at - ?) <= ?
+                limit 1
+                """,
+                (contact, int(created_at), VOICE_TASK_DEDUPE_MS),
+            ).fetchone()
+        return bool(row)
 
     def set_meta(self, key, value):
         with self.lock, self.connect() as db:
@@ -480,6 +495,9 @@ class RelayHandler(BaseHTTPRequestHandler):
         source = str(data.get("source", "android")).strip() or "android"
         status = "voice-pending" if media_type == "voice" and request_transcription else ("transcribed" if source == "mac_voice_transcribe" else "received")
         created_at = int(data.get("createdAt") or now_ms())
+        if media_type == "voice" and request_transcription and self.server.store.recent_voice_pending_exists(contact, created_at):
+            self.json({"ok": True, "deduped": True})
+            return
         self.server.store.add_history(
             {
                 "id": make_id(),

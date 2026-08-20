@@ -903,6 +903,10 @@ def handle_voice_transcribe(task, args):
             result = transcribe_latest_voice(rule["target"], rule)
         text = result["text"].strip()
         remember_processed(task["id"], rule["target"], text)
+        if is_recent_duplicate_transcription(contact, text):
+            append_history(contact, text, f"voice-transcription-duplicate: {result['actual_title']}")
+            print(f"skip duplicate voice transcription: {contact}: {text[:80]}", flush=True)
+            return
         append_history(contact, text, f"voice-transcribed: {result['actual_title']}")
         update_status(
             last_reply_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -919,6 +923,26 @@ def handle_voice_transcribe(task, args):
         update_status(last_error=f"语音转文字失败 {contact}: {error}")
         send_receipt(args.receipt_url, "BarkBridge 语音转文字失败", f"{contact}\n{error}\n请在 Mac 微信手动点语音转文字。")
         print(f"voice-transcribe failed: {contact}: {error}", file=sys.stderr, flush=True)
+
+
+def is_recent_duplicate_transcription(contact, text, window_seconds=180):
+    now = datetime.datetime.now()
+    normalized_text = normalize_match_text(text)
+    if not contact or not normalized_text:
+        return False
+    for item in reversed(load_history()):
+        if str(item.get("contact") or "").strip() != contact:
+            continue
+        if not str(item.get("status") or "").startswith("voice-transcribed"):
+            continue
+        if normalize_match_text(item.get("text") or "") != normalized_text:
+            continue
+        try:
+            then = datetime.datetime.strptime(str(item.get("time") or ""), "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return True
+        return (now - then).total_seconds() <= window_seconds
+    return False
 
 
 def handle_remote_control(command, args):

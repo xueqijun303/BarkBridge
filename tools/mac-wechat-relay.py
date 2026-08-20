@@ -807,10 +807,10 @@ def process_replies(replies, args):
     if not replies:
         return
     remaining = []
-    for reply in replies:
-        normalized = normalize_reply(reply)
+    normalized_replies = [normalize_reply(reply) for reply in replies]
+    process_voice_batches([reply for reply in normalized_replies if reply["action"] == "voice_transcribe"], args)
+    for normalized in normalized_replies:
         if normalized["action"] == "voice_transcribe":
-            handle_voice_transcribe(normalized, args)
             continue
         if normalized["source"] == "control" or normalized["action"]:
             handle_remote_control(normalized, args)
@@ -897,29 +897,54 @@ def handle_voice_transcribe(task, args):
     if is_recently_processed(task["id"]):
         print(f"skip already processed voice task: {contact} ({task['id']})", flush=True)
         return
+    handle_voice_transcribe_batch(contact, [task], args)
+
+
+def process_voice_batches(tasks, args):
+    batches = {}
+    for task in tasks:
+        contact = task["contact"]
+        if not contact:
+            print(f"skip invalid voice task: {task}", flush=True)
+            continue
+        if args.disable_voice_transcribe:
+            print(f"voice-transcribe disabled: {contact}", flush=True)
+            continue
+        if is_recently_processed(task["id"]):
+            print(f"skip already processed voice task: {contact} ({task['id']})", flush=True)
+            continue
+        batches.setdefault(contact, []).append(task)
+    for contact, contact_tasks in batches.items():
+        handle_voice_transcribe_batch(contact, contact_tasks, args)
+
+
+def handle_voice_transcribe_batch(contact, tasks, args):
     rule = resolve_contact_rule(contact)
     try:
         with SEND_LOCK:
-            result = transcribe_latest_voice(rule["target"], rule)
-        text = result["text"].strip()
-        remember_processed(task["id"], rule["target"], text)
-        if is_recent_duplicate_transcription(contact, text):
-            append_history(contact, text, f"voice-transcription-duplicate: {result['actual_title']}")
-            print(f"skip duplicate voice transcription: {contact}: {text[:80]}", flush=True)
-            return
-        append_history(contact, text, f"voice-transcribed: {result['actual_title']}")
+            result = transcribe_recent_voices(rule["target"], rule, len(tasks))
+        texts = [text.strip() for text in result["texts"] if text.strip()]
+        if not texts:
+            raise RuntimeError("未识别到微信转出的文字，可能没有点中语音消息或当前 Mac 微信未完成转文字")
+        for index, text in enumerate(texts):
+            if index < len(tasks):
+                remember_processed(tasks[index]["id"], rule["target"], text)
+            append_history(contact, text, f"voice-transcribed: {result['actual_title']}")
+            upload_transcription(args, contact, text)
+            send_receipt(args.receipt_url, "BarkBridge 语音已转文字", f"{contact}\n{text[:500]}")
         update_status(
             last_reply_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            last_success=f"语音转文字: {contact}",
+            last_success=f"语音转文字: {contact} x{len(texts)}",
             last_identified_title=result["actual_title"],
             last_error="",
         )
-        upload_transcription(args, contact, text)
-        send_receipt(args.receipt_url, "BarkBridge 语音已转文字", f"{contact}\n{text[:500]}")
-        print(f"voice-transcribed: {contact}: {text[:80]}", flush=True)
+        for task in tasks[len(texts):]:
+            append_history(contact, task["text"], "voice-transcribe-skipped: visible voice not found")
+        print(f"voice-transcribed: {contact}: {len(texts)}/{len(tasks)}", flush=True)
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
-        append_history(contact, task["text"], f"voice-transcribe-failed: {error}")
+        for task in tasks:
+            append_history(contact, task["text"], f"voice-transcribe-failed: {error}")
         update_status(last_error=f"语音转文字失败 {contact}: {error}")
         send_receipt(args.receipt_url, "BarkBridge 语音转文字失败", f"{contact}\n{error}\n请在 Mac 微信手动点语音转文字。")
         print(f"voice-transcribe failed: {contact}: {error}", file=sys.stderr, flush=True)
@@ -1181,25 +1206,52 @@ def send_wechat(contact, text, send_shortcut, rule=None):
 
 
 def transcribe_latest_voice(contact, rule=None):
+    result = transcribe_recent_voices(contact, rule, 1)
+    if not result["texts"]:
+        raise RuntimeError("未识别到微信转出的文字，可能没有点中语音消息或当前 Mac 微信未完成转文字")
+    return {"actual_title": result["actual_title"], "text": result["texts"][0]}
+
+
+def transcribe_recent_voices(contact, rule=None, count=1):
     bounds = get_wechat_window_bounds()
     select_contact_by_search(contact, bounds)
     actual_title = verify_selected_chat(contact, "语音转文字", bounds, rule or {})
     before = read_chat_body_text(bounds)
-    text = click_visible_voice_to_text(bounds, before)
-    if not text:
-        trigger_voice_context_menu(bounds)
-        text = wait_for_transcription(before, bounds, timeout_seconds=8)
-    if not text:
-        raise RuntimeError("未识别到微信转出的文字，可能没有点中语音消息或当前 Mac 微信未完成转文字")
-    return {"actual_title": actual_title, "text": text}
+    texts = []
+    used_points = set()
+    for _ in range(max(1, int(count))):
+        text = click_visible_voice_to_text(bounds, before, used_points)
+        if not text:
+            try:
+                trigger_voice_context_menu(bounds, used_points)
+                text = wait_for_transcription(before, bounds, timeout_seconds=8)
+            except Exception:
+                text = ""
+        if not text:
+            break
+        texts.append(text)
+        before = read_chat_body_text(bounds)
+    return {"actual_title": actual_title, "texts": texts}
 
 
-def click_visible_voice_to_text(bounds, before_lines):
+def voice_click_candidates(bounds):
     candidates = []
-    for y_offset in (190, 205, 175, 220):
-        for x_offset in (510, 540, 480, 570):
+    y_offsets = list(range(165, min(620, int(bounds["height"] - 80)), 34))
+    x_offsets = (510, 540, 480, 570, 450, 610)
+    for y_offset in y_offsets:
+        for x_offset in x_offsets:
             candidates.append((bounds["left"] + x_offset, bounds["top"] + bounds["height"] - y_offset))
+    return candidates
+
+
+def click_visible_voice_to_text(bounds, before_lines, used_points=None):
+    used_points = used_points if used_points is not None else set()
+    candidates = voice_click_candidates(bounds)
     for x, y in candidates:
+        point_key = (round(x), round(y))
+        if point_key in used_points:
+            continue
+        used_points.add(point_key)
         click_at(x, y)
         text = wait_for_transcription(before_lines, bounds, timeout_seconds=4)
         if text:
@@ -1207,21 +1259,25 @@ def click_visible_voice_to_text(bounds, before_lines):
     return ""
 
 
-def trigger_voice_context_menu(bounds):
-    x = bounds["left"] + min(430, max(300, bounds["width"] * 0.34))
-    candidate_ys = [
-        bounds["top"] + bounds["height"] - 170,
-        bounds["top"] + bounds["height"] - 225,
-        bounds["top"] + bounds["height"] - 280,
-    ]
+def trigger_voice_context_menu(bounds, used_points=None):
+    used_points = used_points if used_points is not None else set()
+    x_offsets = (430, 470, 390, 520)
+    y_offsets = list(range(165, min(620, int(bounds["height"] - 80)), 55))
     last_error = None
-    for y in candidate_ys:
-        try:
-            right_click_at(x, y)
-            if click_voice_to_text_menu_item():
-                return
-        except Exception as exc:
-            last_error = exc
+    for y_offset in y_offsets:
+        for x_offset in x_offsets:
+            x = bounds["left"] + min(x_offset, max(300, bounds["width"] * 0.45))
+            y = bounds["top"] + bounds["height"] - y_offset
+            point_key = (round(x), round(y))
+            if point_key in used_points:
+                continue
+            used_points.add(point_key)
+            try:
+                right_click_at(x, y)
+                if click_voice_to_text_menu_item():
+                    return
+            except Exception as exc:
+                last_error = exc
     if last_error:
         raise RuntimeError(f"无法打开语音转文字菜单: {last_error}") from last_error
     raise RuntimeError("没有找到微信语音转文字菜单项")

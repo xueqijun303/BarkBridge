@@ -166,51 +166,32 @@ class RelayStore:
                 waiter.put(item)
                 return
             with self.connect() as db:
-                db.execute(
-                    """
-                    insert or replace into queue
-                    (id, token, contact, text, source, action, value, direction, status, created_at)
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        item["id"],
-                        item.get("token", ""),
-                        item.get("contact", ""),
-                        item.get("text", ""),
-                        item.get("source", ""),
-                        item.get("action", ""),
-                        str(item.get("value", "")),
-                        item.get("direction", ""),
-                        item.get("status", ""),
-                        int(item.get("createdAt") or now_ms()),
-                    ),
-                )
+                self.insert_queue_item(db, item)
 
-    def replace_voice_task(self, item):
+    def enqueue_voice_task(self, item):
         with self.lock, self.connect() as db:
-            db.execute(
-                "delete from queue where contact = ? and source = 'voice' and action = 'voice_transcribe'",
-                (item.get("contact", ""),),
-            )
-            db.execute(
-                """
-                insert or replace into queue
-                (id, token, contact, text, source, action, value, direction, status, created_at)
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    item["id"],
-                    item.get("token", ""),
-                    item.get("contact", ""),
-                    item.get("text", ""),
-                    item.get("source", ""),
-                    item.get("action", ""),
-                    str(item.get("value", "")),
-                    item.get("direction", ""),
-                    item.get("status", ""),
-                    int(item.get("createdAt") or now_ms()),
-                ),
-            )
+            self.insert_queue_item(db, item)
+
+    def insert_queue_item(self, db, item):
+        db.execute(
+            """
+            insert or replace into queue
+            (id, token, contact, text, source, action, value, direction, status, created_at)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                item["id"],
+                item.get("token", ""),
+                item.get("contact", ""),
+                item.get("text", ""),
+                item.get("source", ""),
+                item.get("action", ""),
+                str(item.get("value", "")),
+                item.get("direction", ""),
+                item.get("status", ""),
+                int(item.get("createdAt") or now_ms()),
+            ),
+        )
 
     def dequeue(self, wait_ms):
         with self.lock:
@@ -220,11 +201,15 @@ class RelayStore:
             waiter = queue.Queue(maxsize=1)
             self.waiters.append(waiter)
         try:
-            return [waiter.get(timeout=wait_ms / 1000)]
+            item = waiter.get(timeout=wait_ms / 1000)
+            return [item]
         except queue.Empty:
             with self.lock:
                 if waiter in self.waiters:
                     self.waiters.remove(waiter)
+                items = self.pop_queue_locked()
+                if items:
+                    return items
             return []
 
     def pop_queue_locked(self):
@@ -536,7 +521,7 @@ class RelayHandler(BaseHTTPRequestHandler):
             }
         )
         if media_type == "voice" and request_transcription:
-            self.server.store.replace_voice_task(
+            self.server.store.enqueue_voice_task(
                 {
                     "id": make_id(),
                     "token": "voice",

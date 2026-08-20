@@ -806,9 +806,8 @@ def with_query_param(url, key, value):
 def process_replies(replies, args):
     if not replies:
         return
-    remaining = []
     normalized_replies = [normalize_reply(reply) for reply in replies]
-    process_voice_batches([reply for reply in normalized_replies if reply["action"] == "voice_transcribe"], args)
+    remaining = process_voice_batches([reply for reply in normalized_replies if reply["action"] == "voice_transcribe"], args)
     for normalized in normalized_replies:
         if normalized["action"] == "voice_transcribe":
             continue
@@ -914,11 +913,14 @@ def process_voice_batches(tasks, args):
             print(f"skip already processed voice task: {contact} ({task['id']})", flush=True)
             continue
         batches.setdefault(contact, []).append(task)
+    remaining = []
     for contact, contact_tasks in batches.items():
-        handle_voice_transcribe_batch(contact, contact_tasks, args)
+        remaining.extend(handle_voice_transcribe_batch(contact, contact_tasks, args))
+    return remaining
 
 
 def handle_voice_transcribe_batch(contact, tasks, args):
+    tasks = sorted(tasks, key=lambda item: int(item.get("createdAt") or 0), reverse=True)
     rule = resolve_contact_rule(contact)
     try:
         with SEND_LOCK:
@@ -938,16 +940,29 @@ def handle_voice_transcribe_batch(contact, tasks, args):
             last_identified_title=result["actual_title"],
             last_error="",
         )
-        for task in tasks[len(texts):]:
-            append_history(contact, task["text"], "voice-transcribe-skipped: visible voice not found")
+        remaining = retry_voice_tasks(tasks[len(texts):], contact, "visible voice not found")
         print(f"voice-transcribed: {contact}: {len(texts)}/{len(tasks)}", flush=True)
+        return remaining
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
-        for task in tasks:
-            append_history(contact, task["text"], f"voice-transcribe-failed: {error}")
+        remaining = retry_voice_tasks(tasks, contact, error)
         update_status(last_error=f"语音转文字失败 {contact}: {error}")
         send_receipt(args.receipt_url, "BarkBridge 语音转文字失败", f"{contact}\n{error}\n请在 Mac 微信手动点语音转文字。")
         print(f"voice-transcribe failed: {contact}: {error}", file=sys.stderr, flush=True)
+        return remaining
+
+
+def retry_voice_tasks(tasks, contact, reason, max_attempts=4):
+    remaining = []
+    for task in tasks:
+        task["attempts"] = int(task.get("attempts") or 0) + 1
+        status = f"voice-transcribe-retry: {reason}"
+        if task["attempts"] > max_attempts:
+            status = f"voice-transcribe-failed: {reason}"
+        else:
+            remaining.append(task)
+        append_history(contact, task["text"], status)
+    return remaining
 
 
 def is_recent_duplicate_transcription(contact, text, window_seconds=180):
@@ -1216,6 +1231,7 @@ def transcribe_recent_voices(contact, rule=None, count=1):
     bounds = get_wechat_window_bounds()
     select_contact_by_search(contact, bounds)
     actual_title = verify_selected_chat(contact, "语音转文字", bounds, rule or {})
+    scroll_chat_to_bottom(bounds)
     before = read_chat_body_text(bounds)
     texts = []
     used_points = set()
@@ -1232,6 +1248,22 @@ def transcribe_recent_voices(contact, rule=None, count=1):
         texts.append(text)
         before = read_chat_body_text(bounds)
     return {"actual_title": actual_title, "texts": texts}
+
+
+def scroll_chat_to_bottom(bounds):
+    click_at(bounds["left"] + (bounds["width"] * 0.64), bounds["top"] + (bounds["height"] * 0.55))
+    script = r'''
+tell application "System Events"
+  key code 125 using command down
+  delay 0.2
+  key code 121
+  delay 0.2
+end tell
+'''
+    try:
+        subprocess.run([osascript_bin(), "-e", script], check=True, timeout=3)
+    except Exception:
+        pass
 
 
 def voice_click_candidates(bounds):
@@ -1707,6 +1739,16 @@ on run argv
 
   if currentText is expectedText then
     error "发送后输入框仍保留原内容，微信可能没有发出"
+  end if
+  if currentText is not "" then
+    set compactText to currentText
+    set compactText to do shell script "/bin/echo -n " & quoted form of compactText & " | /usr/bin/tr -d '[:space:]'"
+    if compactText is "" then
+      tell application "System Events"
+        key code 51
+        delay 0.1
+      end tell
+    end if
   end if
 end run
 '''

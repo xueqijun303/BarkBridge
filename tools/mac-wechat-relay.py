@@ -1394,8 +1394,7 @@ def extract_transcription(before_lines, after_lines):
     ]
     if added:
         return "\n".join(tail_transcription_lines(added)).strip()
-    filtered = [sanitize_transcription_line(line) for line in after_lines if is_transcription_line(line)]
-    return "\n".join(tail_transcription_lines(filtered)).strip()
+    return ""
 
 
 def tail_transcription_lines(lines, max_lines=4):

@@ -44,6 +44,8 @@ CLICK_HELPER_SOURCE = os.path.join(SCRIPT_DIR, "mac-click.swift")
 CLICK_HELPER_BIN = os.path.join(SCRIPT_DIR, "mac-click")
 OCR_HELPER_SOURCE = os.path.join(SCRIPT_DIR, "mac-ocr.swift")
 OCR_HELPER_BIN = os.path.join(SCRIPT_DIR, "mac-ocr")
+OCR_BOXES_HELPER_SOURCE = os.path.join(SCRIPT_DIR, "mac-ocr-boxes.swift")
+OCR_BOXES_HELPER_BIN = os.path.join(SCRIPT_DIR, "mac-ocr-boxes")
 VISIBLE_CONTACTS = [
     "XQJ家庭群",
     "幸福一家人",
@@ -1276,17 +1278,42 @@ end tell
 
 def voice_click_candidates(bounds):
     candidates = []
-    y_offsets = (145, 180, 215, 250, 290, 335)
+    candidates.extend(voice_duration_candidates(bounds))
+    y_offsets = (145, 190, 240)
     chat_left = 280
     chat_right = int(bounds["width"] - 80)
-    incoming_x_offsets = list(range(chat_left + 45, min(chat_left + 500, chat_right), 48))
+    incoming_x_offsets = list(range(chat_left + 45, min(chat_left + 500, chat_right), 72))
     outgoing_start = max(chat_left + 470, int(bounds["width"] * 0.58))
-    outgoing_x_offsets = list(range(outgoing_start, chat_right, 90))
+    outgoing_x_offsets = list(range(outgoing_start, chat_right, 120))
     x_offsets = incoming_x_offsets + outgoing_x_offsets
     for y_offset in y_offsets:
         for x_offset in x_offsets:
             candidates.append((bounds["left"] + x_offset, bounds["top"] + bounds["height"] - y_offset))
     return candidates
+
+
+def voice_duration_candidates(bounds):
+    boxes = read_chat_body_boxes(bounds)
+    candidates = []
+    for item in boxes:
+        text = str(item.get("text") or "").strip()
+        if not is_voice_duration_text(text):
+            continue
+        cx = bounds["left"] + item["cropX"] + item["x"] + (item["width"] / 2)
+        cy = bounds["top"] + item["cropY"] + item["y"] + (item["height"] / 2)
+        for dx in (-120, -80, -45, 0, 45, 80):
+            candidates.append((cx + dx, cy))
+        for dx in (-100, -55, 0, 55):
+            candidates.append((cx + dx, cy + 18))
+            candidates.append((cx + dx, cy - 18))
+    if candidates:
+        print(f"voice duration OCR candidates: {len(candidates)}", flush=True)
+    return candidates
+
+
+def is_voice_duration_text(text):
+    compact = normalize_match_text(text)
+    return bool(re.fullmatch(r"[0-9]{1,2}[\"”″秒]?", compact) or re.fullmatch(r"[0-9]{1,2}s", compact))
 
 
 def click_visible_voice_to_text(bounds, before_lines, used_points=None):
@@ -1384,12 +1411,7 @@ end run
 def read_chat_body_text(bounds):
     ensure_ocr_helper()
     ensure_wechat_frontmost()
-    crop = {
-        "x": bounds["left"] + 250,
-        "y": bounds["top"] + 55,
-        "width": max(420, bounds["width"] - 300),
-        "height": max(300, bounds["height"] - 185),
-    }
+    crop = chat_body_crop(bounds)
     fd, path = tempfile.mkstemp(prefix="barkbridge-chat-", suffix=".png")
     os.close(fd)
     try:
@@ -1402,6 +1424,40 @@ def read_chat_body_text(bounds):
             os.remove(path)
         except FileNotFoundError:
             pass
+
+
+def read_chat_body_boxes(bounds):
+    ensure_ocr_boxes_helper()
+    ensure_wechat_frontmost()
+    crop = chat_body_crop(bounds)
+    fd, path = tempfile.mkstemp(prefix="barkbridge-chat-boxes-", suffix=".png")
+    os.close(fd)
+    try:
+        region = f"{int(crop['x'])},{int(crop['y'])},{int(crop['width'])},{int(crop['height'])}"
+        subprocess.run(["/usr/sbin/screencapture", "-x", "-R", region, path], check=True, timeout=5)
+        result = subprocess.run([OCR_BOXES_HELPER_BIN, path], check=True, capture_output=True, text=True, timeout=20)
+        rows = json.loads(result.stdout or "[]")
+        for row in rows:
+            row["cropX"] = crop["x"] - bounds["left"]
+            row["cropY"] = crop["y"] - bounds["top"]
+        return rows
+    except Exception as exc:
+        print(f"voice duration OCR failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        return []
+    finally:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+
+def chat_body_crop(bounds):
+    return {
+        "x": bounds["left"] + 250,
+        "y": bounds["top"] + 55,
+        "width": max(420, bounds["width"] - 300),
+        "height": max(300, bounds["height"] - 185),
+    }
 
 
 def ensure_wechat_frontmost():
@@ -1692,6 +1748,12 @@ def ensure_ocr_helper():
     if os.path.exists(OCR_HELPER_BIN) and os.path.getmtime(OCR_HELPER_BIN) >= os.path.getmtime(OCR_HELPER_SOURCE):
         return
     subprocess.run(["/usr/bin/swiftc", OCR_HELPER_SOURCE, "-o", OCR_HELPER_BIN], check=True, timeout=30)
+
+
+def ensure_ocr_boxes_helper():
+    if os.path.exists(OCR_BOXES_HELPER_BIN) and os.path.getmtime(OCR_BOXES_HELPER_BIN) >= os.path.getmtime(OCR_BOXES_HELPER_SOURCE):
+        return
+    subprocess.run(["/usr/bin/swiftc", OCR_BOXES_HELPER_SOURCE, "-o", OCR_BOXES_HELPER_BIN], check=True, timeout=30)
 
 
 def click_at(x, y):

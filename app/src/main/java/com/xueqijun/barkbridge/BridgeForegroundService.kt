@@ -25,6 +25,7 @@ class BridgeForegroundService : Service() {
             LogStore.add(context, "屏幕状态: $action", diagnostic = true)
             BatteryEvents.handle(context, intent)
             PendingPushes.flush(context, action)
+            PendingConversationUploads.flush(context, action)
             if (action == Intent.ACTION_USER_PRESENT) {
                 requestNotificationListenerRebind(context)
             }
@@ -46,6 +47,7 @@ class BridgeForegroundService : Service() {
         registerScreenReceiver()
         requestNotificationListenerRebind(applicationContext)
         PendingPushes.flush(applicationContext, "service_start")
+        PendingConversationUploads.flush(applicationContext, "service_start")
         RemoteReplyPoller.start(applicationContext)
         handler.postDelayed(rebindRunnable, REBIND_INTERVAL_MS)
         LogStore.add(applicationContext, "后台常驻服务已启动")

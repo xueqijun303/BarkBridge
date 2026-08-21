@@ -17,46 +17,56 @@ object ConversationMirror {
             return
         }
 
+        val payload = JSONObject()
+            .put("secret", secret)
+            .put("contact", contact)
+            .put("text", text)
+            .put("direction", "incoming")
+            .put("source", "android")
+            .put("mediaType", mediaType)
+            .put("requestTranscription", requestTranscription)
+            .put("createdAt", System.currentTimeMillis())
         Thread {
-            var conn: HttpURLConnection? = null
-            try {
-                val body = JSONObject()
-                    .put("secret", secret)
-                    .put("contact", contact)
-                    .put("text", text)
-                    .put("direction", "incoming")
-                    .put("source", "android")
-                    .put("mediaType", mediaType)
-                    .put("requestTranscription", requestTranscription)
-                    .put("createdAt", System.currentTimeMillis())
-                    .toString()
-                    .toByteArray(Charsets.UTF_8)
-                conn = URL(endpoint).openConnection() as HttpURLConnection
-                conn.requestMethod = "POST"
-                conn.connectTimeout = 10000
-                conn.readTimeout = 10000
-                conn.doOutput = true
-                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                conn.setRequestProperty("User-Agent", "BarkBridge/1.3.12 Android")
-                conn.outputStream.use { it.write(body) }
-                val code = conn.responseCode
-                if (code !in 200..299) {
-                    val detail = try {
-                        (conn.errorStream ?: conn.inputStream)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-                    } catch (e: Exception) {
-                        ""
-                    }
-                    val suffix = if (detail.isBlank()) "" else " ${detail.take(80)}"
-                    LogStore.add(ctx, "聊天面板上传失败: HTTP $code$suffix", category = "聊天")
-                } else {
-                    LogStore.add(ctx, "聊天面板已上传: $contact", category = "聊天")
-                }
-            } catch (e: Exception) {
-                LogStore.add(ctx, "聊天面板上传失败: ${e.javaClass.simpleName} ${e.message.orEmpty()}".take(180), category = "聊天")
-            } finally {
-                conn?.disconnect()
-            }
+            upload(ctx, payload, queueOnFailure = true)
         }.start()
+    }
+
+    fun upload(ctx: Context, payload: JSONObject, queueOnFailure: Boolean): Boolean {
+        val endpoint = AppSettings.conversationIngestUrl(ctx)
+        if (endpoint.isBlank()) return false
+        var conn: HttpURLConnection? = null
+        return try {
+            val body = payload.toString().toByteArray(Charsets.UTF_8)
+            conn = URL(endpoint).openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.connectTimeout = 10000
+            conn.readTimeout = 10000
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            conn.setRequestProperty("User-Agent", "BarkBridge/1.3.13 Android")
+            conn.outputStream.use { it.write(body) }
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                val detail = try {
+                    (conn.errorStream ?: conn.inputStream)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                } catch (e: Exception) {
+                    ""
+                }
+                val suffix = if (detail.isBlank()) "" else " ${detail.take(80)}"
+                LogStore.add(ctx, "聊天面板上传失败: HTTP $code$suffix", category = "聊天")
+                if (queueOnFailure) PendingConversationUploads.add(ctx, payload)
+                false
+            } else {
+                LogStore.add(ctx, "聊天面板已上传: ${payload.optString("contact")}", category = "聊天")
+                true
+            }
+        } catch (e: Exception) {
+            LogStore.add(ctx, "聊天面板上传失败: ${e.javaClass.simpleName} ${e.message.orEmpty()}".take(180), category = "聊天")
+            if (queueOnFailure) PendingConversationUploads.add(ctx, payload)
+            false
+        } finally {
+            conn?.disconnect()
+        }
     }
 
     fun chatUrl(ctx: Context, contact: String): String {

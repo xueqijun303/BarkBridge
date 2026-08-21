@@ -11,5 +11,6 @@ class DeviceStateReceiver : BroadcastReceiver() {
         BatteryEvents.handle(context, intent)
         BridgeForegroundService.start(context)
         PendingPushes.flush(context, action)
+        PendingConversationUploads.flush(context, action)
     }
 }

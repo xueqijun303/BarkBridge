@@ -59,6 +59,7 @@ class MainActivity : Activity() {
         super.onResume()
         BridgeForegroundService.start(this)
         PendingPushes.flush(this, "activity_resume")
+        PendingConversationUploads.flush(this, "activity_resume")
         refreshStatus()
     }
 

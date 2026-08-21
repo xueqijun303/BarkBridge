@@ -1391,9 +1391,22 @@ def extract_transcription(before_lines, after_lines):
         if is_transcription_line(line) and normalize_match_text(line) not in before
     ]
     if added:
-        return "\n".join(added[-4:]).strip()
+        return "\n".join(tail_transcription_lines(added)).strip()
     filtered = [sanitize_transcription_line(line) for line in after_lines if is_transcription_line(line)]
-    return "\n".join(filtered[-4:]).strip()
+    return "\n".join(tail_transcription_lines(filtered)).strip()
+
+
+def tail_transcription_lines(lines, max_lines=4):
+    picked = []
+    for line in reversed([line for line in lines if line.strip()]):
+        if is_ocr_noise_line(line):
+            if picked:
+                break
+            continue
+        picked.append(line)
+        if len(picked) >= max_lines:
+            break
+    return list(reversed(picked))
 
 
 def sanitize_transcription_line(text):
@@ -1407,6 +1420,8 @@ def is_transcription_line(text):
     text = str(text or "").strip()
     if is_wechat_ui_text(text):
         return False
+    if is_ocr_noise_line(text):
+        return False
     compact = normalize_match_text(text)
     if len(compact) < 3:
         return False
@@ -1417,6 +1432,26 @@ def is_transcription_line(text):
     if re.fullmatch(r"[\W_0-9A-Za-z]{1,8}", text):
         return False
     return True
+
+
+def is_ocr_noise_line(text):
+    text = str(text or "").strip()
+    if not text:
+        return True
+    compact = normalize_match_text(text)
+    if re.search(r"[*#@$%^_=+<>|{}\\[\\]~`]", text):
+        return True
+    digit_count = len(re.findall(r"\d", text))
+    latin_count = len(re.findall(r"[A-Za-z]", text))
+    cjk_count = len(re.findall(r"[\u4e00-\u9fff]", text))
+    visible_count = max(1, len(re.sub(r"\s", "", text)))
+    if digit_count >= 4 and digit_count / visible_count >= 0.18:
+        return True
+    if cjk_count >= 4 and latin_count >= 1 and not re.search(r"\b(OK|ok|App|Mac|iPhone|Bark|HTTP)\b", text):
+        return True
+    if len(compact) <= 4 and re.search(r"[!！?？]", text):
+        return True
+    return False
 
 
 def is_wechat_ui_text(text):

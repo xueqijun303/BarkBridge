@@ -7,3 +7,4 @@ local.properties
 .wrangler/
 tools/mac-click
 tools/mac-ocr
+tools/mac-ocr-boxes

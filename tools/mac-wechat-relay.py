@@ -103,6 +103,8 @@ def main():
     parser.add_argument("--receipt-url", default=os.environ.get("BARKBRIDGE_RECEIPT_URL", ""), help="Optional Bark endpoint URL for send receipts, for example https://api.day.app/key.")
     parser.add_argument("--ingest-url", default=os.environ.get("BARKBRIDGE_INGEST_URL", ""), help="Optional relay ingest URL for writing voice transcription results. Defaults to /ingest derived from --poll-url.")
     parser.add_argument("--disable-voice-transcribe", action="store_true", help="Disable experimental Mac WeChat voice-to-text tasks.")
+    parser.add_argument("--voice-max-retries", type=int, default=1, help="Maximum local retry attempts for experimental voice-to-text tasks.")
+    parser.add_argument("--voice-task-ttl-minutes", type=int, default=10, help="Drop voice-to-text tasks older than this many minutes.")
     parser.add_argument("--max-retries", type=int, default=5, help="Maximum local retry attempts for failed sends.")
     parser.add_argument("--send-shortcut", choices=["enter", "cmd-enter", "both"], default="both", help="WeChat send shortcut to use after pasting the reply.")
     parser.add_argument("--web-host", default="127.0.0.1", help="Local web console host.")
@@ -149,7 +151,11 @@ def main():
 
 def start_web_console(args):
     handler = make_web_handler(args)
-    server = http.server.ThreadingHTTPServer((args.web_host, args.web_port), handler)
+    try:
+        server = http.server.ThreadingHTTPServer((args.web_host, args.web_port), handler)
+    except OSError as exc:
+        print(f"web disabled: http://{args.web_host}:{args.web_port}/ unavailable: {exc}", file=sys.stderr, flush=True)
+        return
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     print(f"web: http://{args.web_host}:{args.web_port}/", flush=True)
@@ -909,8 +915,16 @@ def process_voice_batches(tasks, args):
         if not contact:
             print(f"skip invalid voice task: {task}", flush=True)
             continue
+        if is_expired_voice_task(task, args.voice_task_ttl_minutes):
+            reason = f"voice-transcribe-expired: older than {args.voice_task_ttl_minutes} minutes"
+            append_history(contact, task["text"], reason)
+            remember_processed(task["id"], contact, reason)
+            print(f"drop expired voice task: {contact} ({task['id']})", file=sys.stderr, flush=True)
+            continue
         if args.disable_voice_transcribe:
             print(f"voice-transcribe disabled: {contact}", flush=True)
+            append_history(contact, task["text"], "voice-transcribe-disabled")
+            remember_processed(task["id"], contact, "voice-transcribe-disabled")
             continue
         if is_recently_processed(task["id"]):
             print(f"skip already processed voice task: {contact} ({task['id']})", flush=True)
@@ -949,29 +963,40 @@ def handle_voice_transcribe_batch(contact, tasks, args):
             last_identified_title=result["actual_title"],
             last_error="",
         )
-        remaining = retry_voice_tasks(tasks[len(texts):], contact, "visible voice not found")
+        remaining = retry_voice_tasks(tasks[len(texts):], contact, "visible voice not found", args.voice_max_retries)
         print(f"voice-transcribed: {contact}: {len(texts)}/{len(tasks)}", flush=True)
         return remaining
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
-        remaining = retry_voice_tasks(tasks, contact, error)
+        remaining = retry_voice_tasks(tasks, contact, error, args.voice_max_retries)
         update_status(last_error=f"语音转文字失败 {contact}: {error}")
         send_receipt(args.receipt_url, "BarkBridge 语音转文字失败", f"{contact}\n{error}\n请在 Mac 微信手动点语音转文字。")
         print(f"voice-transcribe failed: {contact}: {error}", file=sys.stderr, flush=True)
         return remaining
 
 
-def retry_voice_tasks(tasks, contact, reason, max_attempts=2):
+def retry_voice_tasks(tasks, contact, reason, max_attempts=1):
     remaining = []
     for task in tasks:
         task["attempts"] = int(task.get("attempts") or 0) + 1
         status = f"voice-transcribe-retry: {reason}"
         if task["attempts"] > max_attempts:
             status = f"voice-transcribe-failed: {reason}"
+            remember_processed(task.get("id"), contact, status)
         else:
             remaining.append(task)
         append_history(contact, task["text"], status)
     return remaining
+
+
+def is_expired_voice_task(task, ttl_minutes):
+    try:
+        created_at = int(task.get("createdAt") or 0)
+    except Exception:
+        created_at = 0
+    if created_at <= 0 or ttl_minutes <= 0:
+        return False
+    return int(time.time() * 1000) - created_at > ttl_minutes * 60 * 1000
 
 
 def is_recent_duplicate_transcription(contact, text, window_seconds=180):

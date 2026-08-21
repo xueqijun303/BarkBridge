@@ -102,7 +102,8 @@ def main():
     parser.add_argument("--worker-wait-ms", type=int, default=-1, help="Worker long-poll wait time in milliseconds. -1 means auto-detect, 0 means immediate polling.")
     parser.add_argument("--receipt-url", default=os.environ.get("BARKBRIDGE_RECEIPT_URL", ""), help="Optional Bark endpoint URL for send receipts, for example https://api.day.app/key.")
     parser.add_argument("--ingest-url", default=os.environ.get("BARKBRIDGE_INGEST_URL", ""), help="Optional relay ingest URL for writing voice transcription results. Defaults to /ingest derived from --poll-url.")
-    parser.add_argument("--disable-voice-transcribe", action="store_true", help="Disable experimental Mac WeChat voice-to-text tasks.")
+    parser.add_argument("--enable-voice-transcribe", action="store_true", help="Enable experimental Mac WeChat voice-to-text UI automation. Disabled by default because current Mac WeChat exposes neither chat Accessibility elements nor plain voice files.")
+    parser.add_argument("--disable-voice-transcribe", action="store_true", help="Disable experimental Mac WeChat voice-to-text tasks. Kept for compatibility; voice transcription is disabled by default.")
     parser.add_argument("--voice-max-retries", type=int, default=1, help="Maximum local retry attempts for experimental voice-to-text tasks.")
     parser.add_argument("--voice-task-ttl-minutes", type=int, default=10, help="Drop voice-to-text tasks older than this many minutes.")
     parser.add_argument("--max-retries", type=int, default=5, help="Maximum local retry attempts for failed sends.")
@@ -899,7 +900,7 @@ def handle_voice_transcribe(task, args):
     if not contact:
         print(f"skip invalid voice task: {task}", flush=True)
         return
-    if args.disable_voice_transcribe:
+    if not voice_transcribe_enabled(args):
         print(f"voice-transcribe disabled: {contact}", flush=True)
         return
     if is_recently_processed(task["id"]):
@@ -921,7 +922,7 @@ def process_voice_batches(tasks, args):
             remember_processed(task["id"], contact, reason)
             print(f"drop expired voice task: {contact} ({task['id']})", file=sys.stderr, flush=True)
             continue
-        if args.disable_voice_transcribe:
+        if not voice_transcribe_enabled(args):
             print(f"voice-transcribe disabled: {contact}", flush=True)
             append_history(contact, task["text"], "voice-transcribe-disabled")
             remember_processed(task["id"], contact, "voice-transcribe-disabled")
@@ -987,6 +988,10 @@ def retry_voice_tasks(tasks, contact, reason, max_attempts=1):
             remaining.append(task)
         append_history(contact, task["text"], status)
     return remaining
+
+
+def voice_transcribe_enabled(args):
+    return bool(getattr(args, "enable_voice_transcribe", False)) and not bool(getattr(args, "disable_voice_transcribe", False))
 
 
 def is_expired_voice_task(task, ttl_minutes):

@@ -1276,8 +1276,13 @@ end tell
 
 def voice_click_candidates(bounds):
     candidates = []
-    y_offsets = list(range(165, min(620, int(bounds["height"] - 80)), 34))
-    x_offsets = (510, 540, 480, 570, 450, 610)
+    y_offsets = list(range(150, min(680, int(bounds["height"] - 70)), 42))
+    chat_left = 280
+    chat_right = int(bounds["width"] - 80)
+    incoming_x_offsets = list(range(chat_left + 70, min(chat_left + 470, chat_right), 52))
+    outgoing_start = max(chat_left + 470, int(bounds["width"] * 0.58))
+    outgoing_x_offsets = list(range(outgoing_start, chat_right, 72))
+    x_offsets = incoming_x_offsets + outgoing_x_offsets
     for y_offset in y_offsets:
         for x_offset in x_offsets:
             candidates.append((bounds["left"] + x_offset, bounds["top"] + bounds["height"] - y_offset))
@@ -1287,13 +1292,14 @@ def voice_click_candidates(bounds):
 def click_visible_voice_to_text(bounds, before_lines, used_points=None):
     used_points = used_points if used_points is not None else set()
     candidates = voice_click_candidates(bounds)
+    print(f"voice click scan: {len(candidates)} candidates", flush=True)
     for x, y in candidates:
         point_key = (round(x), round(y))
         if point_key in used_points:
             continue
         used_points.add(point_key)
         click_at(x, y)
-        text = wait_for_transcription(before_lines, bounds, timeout_seconds=4)
+        text = wait_for_transcription(before_lines, bounds, timeout_seconds=2)
         if text:
             return text
     return ""
@@ -1301,9 +1307,14 @@ def click_visible_voice_to_text(bounds, before_lines, used_points=None):
 
 def trigger_voice_context_menu(bounds, used_points=None):
     used_points = used_points if used_points is not None else set()
-    x_offsets = (430, 470, 390, 520)
-    y_offsets = list(range(165, min(620, int(bounds["height"] - 80)), 55))
+    chat_left = 280
+    chat_right = int(bounds["width"] - 80)
+    incoming_x_offsets = list(range(chat_left + 70, min(chat_left + 470, chat_right), 60))
+    outgoing_start = max(chat_left + 470, int(bounds["width"] * 0.58))
+    x_offsets = incoming_x_offsets + list(range(outgoing_start, chat_right, 88))
+    y_offsets = list(range(150, min(680, int(bounds["height"] - 70)), 56))
     last_error = None
+    print(f"voice menu scan: {len(x_offsets) * len(y_offsets)} candidates", flush=True)
     for y_offset in y_offsets:
         for x_offset in x_offsets:
             x = bounds["left"] + min(x_offset, max(300, bounds["width"] * 0.45))

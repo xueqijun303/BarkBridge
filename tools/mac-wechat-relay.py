@@ -114,6 +114,7 @@ def main():
         start_web_console(args)
 
     configure_poll_mode(args)
+    print(f"relay config: poll={args.poll_url} receipt={args.receipt_url or '-'}", flush=True)
 
     last_poll_error = ""
     last_poll_error_time = 0.0
@@ -1186,7 +1187,8 @@ def send_receipt(receipt_url, title, body):
     try:
         request = urllib.request.Request(url, headers={"User-Agent": "BarkBridge-MacRelay/1.0"})
         with urllib.request.urlopen(request, timeout=10) as response:
-            response.read()
+            body = response.read().decode("utf-8", errors="replace")
+            print(f"receipt sent: HTTP {response.status}: {title}: {body[:120]}", flush=True)
     except Exception as exc:
         print(f"receipt error: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
 

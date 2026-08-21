@@ -929,9 +929,12 @@ def handle_voice_transcribe_batch(contact, tasks, args):
         texts = [text.strip() for text in result["texts"] if text.strip()]
         if not texts:
             raise RuntimeError("未识别到微信转出的文字，可能没有点中语音消息或当前 Mac 微信未完成转文字")
-        texts = [text for text in texts if not is_non_wechat_transcription(text)]
+        rejected = [text for text in texts if is_non_wechat_transcription(text) or is_low_confidence_transcription(text)]
+        for text in rejected:
+            print(f"reject voice transcription: {contact}: {text[:120]}", file=sys.stderr, flush=True)
+        texts = [text for text in texts if text not in rejected]
         if not texts:
-            raise RuntimeError("OCR 结果疑似不是微信语音转文字内容，已丢弃并等待重试")
+            raise RuntimeError("OCR 结果疑似不是有效微信语音转文字内容，已丢弃并等待重试")
         for index, text in enumerate(texts):
             if index < len(tasks):
                 remember_processed(tasks[index]["id"], rule["target"], text)
@@ -1394,13 +1397,16 @@ def ensure_wechat_frontmost():
     script = r'''
 tell application "WeChat"
   activate
+  try
+    reopen
+  end try
 end tell
-delay 0.3
+delay 0.8
 tell application "System Events"
   try
     set frontmost of process "WeChat" to true
   end try
-  delay 0.2
+  delay 0.4
   set frontApp to name of first application process whose frontmost is true
 end tell
 return frontApp
@@ -1493,6 +1499,25 @@ def is_non_wechat_transcription(text):
         "语音会明确失败或重试",
     ]
     return any(normalize_match_text(item) in compact for item in blocked)
+
+
+def is_low_confidence_transcription(text):
+    text = str(text or "").strip()
+    compact = normalize_match_text(text)
+    cjk_count = len(re.findall(r"[\u4e00-\u9fff]", text))
+    latin_count = len(re.findall(r"[A-Za-z]", text))
+    digit_count = len(re.findall(r"\d", text))
+    if len(compact) <= 2:
+        return True
+    if cjk_count <= 1 and latin_count == 0:
+        return True
+    if cjk_count <= 2 and re.fullmatch(r"[\u4e00-\u9fff.。…\\s]+", text):
+        return True
+    if cjk_count <= 2 and digit_count > 0:
+        return True
+    if compact in {"房", "房.", "房..", "房…", "房....", "白山"}:
+        return True
+    return False
 
 
 def is_wechat_ui_text(text):

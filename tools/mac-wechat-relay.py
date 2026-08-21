@@ -929,6 +929,9 @@ def handle_voice_transcribe_batch(contact, tasks, args):
         texts = [text.strip() for text in result["texts"] if text.strip()]
         if not texts:
             raise RuntimeError("未识别到微信转出的文字，可能没有点中语音消息或当前 Mac 微信未完成转文字")
+        texts = [text for text in texts if not is_non_wechat_transcription(text)]
+        if not texts:
+            raise RuntimeError("OCR 结果疑似不是微信语音转文字内容，已丢弃并等待重试")
         for index, text in enumerate(texts):
             if index < len(tasks):
                 remember_processed(tasks[index]["id"], rule["target"], text)
@@ -1366,6 +1369,7 @@ end run
 
 def read_chat_body_text(bounds):
     ensure_ocr_helper()
+    ensure_wechat_frontmost()
     crop = {
         "x": bounds["left"] + 250,
         "y": bounds["top"] + 55,
@@ -1384,6 +1388,27 @@ def read_chat_body_text(bounds):
             os.remove(path)
         except FileNotFoundError:
             pass
+
+
+def ensure_wechat_frontmost():
+    script = r'''
+tell application "WeChat"
+  activate
+end tell
+delay 0.3
+tell application "System Events"
+  try
+    set frontmost of process "WeChat" to true
+  end try
+  delay 0.2
+  set frontApp to name of first application process whose frontmost is true
+end tell
+return frontApp
+'''
+    result = subprocess.run([osascript_bin(), "-e", script], check=True, capture_output=True, text=True, timeout=5)
+    front_app = result.stdout.strip()
+    if front_app not in {"WeChat", "微信"}:
+        raise RuntimeError(f"微信窗口未在前台，当前前台为 {front_app or '未知'}，已跳过 OCR 防止误读")
 
 
 def extract_transcription(before_lines, after_lines):
@@ -1453,6 +1478,21 @@ def is_ocr_noise_line(text):
     if len(compact) <= 4 and re.search(r"[!！?？]", text):
         return True
     return False
+
+
+def is_non_wechat_transcription(text):
+    compact = normalize_match_text(text)
+    blocked = [
+        "barkbridge-release",
+        "mac-wechat-relay",
+        "本地待处理队列",
+        "已编辑",
+        "github",
+        "codex",
+        "queuecount",
+        "语音会明确失败或重试",
+    ]
+    return any(normalize_match_text(item) in compact for item in blocked)
 
 
 def is_wechat_ui_text(text):
@@ -1668,6 +1708,7 @@ def verify_selected_chat(expected_contact, text, bounds, rule):
 
 def read_selected_chat_title(bounds):
     ensure_ocr_helper()
+    ensure_wechat_frontmost()
     crop = {
         "x": bounds["left"] + 215,
         "y": bounds["top"] + 10,

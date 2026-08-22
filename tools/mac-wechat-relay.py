@@ -110,6 +110,7 @@ def main():
     parser.add_argument("--voice-menu-limit", type=int, default=12, help="Maximum voice context-menu probes per voice task.")
     parser.add_argument("--voice-probe-timeout", type=float, default=0.8, help="Seconds to wait after each voice click probe.")
     parser.add_argument("--voice-final-timeout", type=float, default=5.0, help="Seconds to wait after clicking the voice-to-text menu item.")
+    parser.add_argument("--voice-left-click-first", action="store_true", help="Try left-click OCR probes before the context-menu path. Disabled by default to avoid long OCR scans.")
     parser.add_argument("--max-retries", type=int, default=5, help="Maximum local retry attempts for failed sends.")
     parser.add_argument("--send-shortcut", choices=["enter", "cmd-enter", "both"], default="both", help="WeChat send shortcut to use after pasting the reply.")
     parser.add_argument("--web-host", default="127.0.0.1", help="Local web console host.")
@@ -1276,7 +1277,7 @@ def transcribe_recent_voices(contact, rule=None, count=1, args=None):
     select_contact_by_search(contact, bounds)
     actual_title = verify_selected_chat(contact, "语音转文字", bounds, rule or {})
     scroll_chat_to_bottom(bounds)
-    before = read_chat_body_text(bounds)
+    before = read_chat_body_text(bounds, ocr_timeout=8)
     texts = []
     used_points = set()
     click_limit = int(getattr(args, "voice_click_limit", 24) or 24)
@@ -1284,7 +1285,9 @@ def transcribe_recent_voices(contact, rule=None, count=1, args=None):
     probe_timeout = float(getattr(args, "voice_probe_timeout", 0.8) or 0.8)
     final_timeout = float(getattr(args, "voice_final_timeout", 5.0) or 5.0)
     for _ in range(max(1, int(count))):
-        text = click_visible_voice_to_text(bounds, before, used_points, click_limit, probe_timeout)
+        text = ""
+        if bool(getattr(args, "voice_left_click_first", False)):
+            text = click_visible_voice_to_text(bounds, before, used_points, click_limit, probe_timeout)
         if not text:
             try:
                 trigger_voice_context_menu(bounds, used_points, menu_limit)
@@ -1294,7 +1297,7 @@ def transcribe_recent_voices(contact, rule=None, count=1, args=None):
         if not text:
             break
         texts.append(text)
-        before = read_chat_body_text(bounds)
+        before = read_chat_body_text(bounds, ocr_timeout=8)
     return {"actual_title": actual_title, "texts": texts}
 
 
@@ -1456,8 +1459,8 @@ def trigger_voice_context_menu_legacy(bounds, used_points=None):
 def wait_for_transcription(before_lines, bounds, timeout_seconds):
     deadline = time.time() + max(1, timeout_seconds)
     while time.time() < deadline:
-        time.sleep(1.0)
-        after = read_chat_body_text(bounds)
+        time.sleep(0.8)
+        after = read_chat_body_text(bounds, ocr_timeout=6)
         text = extract_transcription(before_lines, after)
         if text:
             return text
@@ -1500,7 +1503,7 @@ end run
     return result.stdout.strip() == "ok"
 
 
-def read_chat_body_text(bounds):
+def read_chat_body_text(bounds, ocr_timeout=20):
     ensure_ocr_helper()
     ensure_wechat_frontmost()
     crop = chat_body_crop(bounds)
@@ -1509,7 +1512,7 @@ def read_chat_body_text(bounds):
     try:
         region = f"{int(crop['x'])},{int(crop['y'])},{int(crop['width'])},{int(crop['height'])}"
         subprocess.run(["/usr/sbin/screencapture", "-x", "-R", region, path], check=True, timeout=5)
-        result = subprocess.run([OCR_HELPER_BIN, path], check=True, capture_output=True, text=True, timeout=20)
+        result = subprocess.run([OCR_HELPER_BIN, path], check=True, capture_output=True, text=True, timeout=max(2, ocr_timeout))
         return [line.strip() for line in result.stdout.splitlines() if line.strip()]
     finally:
         try:

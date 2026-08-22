@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -95,6 +96,10 @@ DEFAULT_CONTACT_RULES = {
 
 
 def main():
+    if "--voice-worker" in sys.argv:
+        voice_worker_main()
+        return
+
     parser = argparse.ArgumentParser(description="Poll BarkBridge relay and send replies through Mac WeChat.")
     parser.add_argument("--poll-url", required=True, help="Relay poll URL, including secret query string.")
     parser.add_argument("--interval", type=int, default=1, help="Delay after each poll in seconds.")
@@ -111,6 +116,8 @@ def main():
     parser.add_argument("--voice-probe-timeout", type=float, default=0.8, help="Seconds to wait after each voice click probe.")
     parser.add_argument("--voice-final-timeout", type=float, default=5.0, help="Seconds to wait after clicking the voice-to-text menu item.")
     parser.add_argument("--voice-left-click-first", action="store_true", help="Try left-click OCR probes before the context-menu path. Disabled by default to avoid long OCR scans.")
+    parser.add_argument("--voice-worker-timeout", type=int, default=35, help="Hard timeout in seconds for the isolated voice UI worker process.")
+    parser.add_argument("--loop-timeout", type=int, default=45, help="Hard timeout in seconds for one poll/process loop.")
     parser.add_argument("--max-retries", type=int, default=5, help="Maximum local retry attempts for failed sends.")
     parser.add_argument("--send-shortcut", choices=["enter", "cmd-enter", "both"], default="both", help="WeChat send shortcut to use after pasting the reply.")
     parser.add_argument("--web-host", default="127.0.0.1", help="Local web console host.")
@@ -129,16 +136,24 @@ def main():
     last_poll_error = ""
     last_poll_error_time = 0.0
     poll_error_count = 0
+    install_loop_timeout_handler()
     while True:
         try:
-            pending = load_pending()
-            if pending:
-                process_replies(pending, args)
-            else:
-                replies = fetch_replies(args.poll_url, args.poll_timeout, args.worker_wait_ms)
-                process_replies(replies, args)
+            signal.alarm(max(5, int(args.loop_timeout)))
+            try:
+                pending = load_pending()
+                if pending:
+                    process_replies(pending, args)
+                else:
+                    replies = fetch_replies(args.poll_url, args.poll_timeout, args.worker_wait_ms)
+                    process_replies(replies, args)
+            finally:
+                signal.alarm(0)
             last_poll_error = ""
             poll_error_count = 0
+        except LoopTimeoutError as exc:
+            print(f"loop warning: {exc}", file=sys.stderr, flush=True)
+            update_status(last_error=str(exc))
         except PollNetworkError as exc:
             poll_error_count += 1
             now = time.time()
@@ -153,6 +168,16 @@ def main():
         if args.once:
             return
         time.sleep(max(3, args.interval))
+
+
+class LoopTimeoutError(TimeoutError):
+    pass
+
+
+def install_loop_timeout_handler():
+    def handle_timeout(signum, frame):
+        raise LoopTimeoutError("本轮轮询/语音处理超过硬超时，已中断以恢复后续轮询")
+    signal.signal(signal.SIGALRM, handle_timeout)
 
 
 def start_web_console(args):
@@ -947,7 +972,7 @@ def handle_voice_transcribe_batch(contact, tasks, args):
     rule = resolve_contact_rule(contact)
     try:
         with SEND_LOCK:
-            result = transcribe_recent_voices(rule["target"], rule, len(tasks), args)
+            result = run_voice_transcribe_worker(rule["target"], rule, len(tasks), args)
         texts = [text.strip() for text in result["texts"] if text.strip()]
         if not texts:
             raise RuntimeError("未识别到微信转出的文字，可能没有点中语音消息或当前 Mac 微信未完成转文字")
@@ -997,6 +1022,90 @@ def retry_voice_tasks(tasks, contact, reason, max_attempts=1):
 
 def voice_transcribe_enabled(args):
     return bool(getattr(args, "enable_voice_transcribe", False)) and not bool(getattr(args, "disable_voice_transcribe", False))
+
+
+def run_voice_transcribe_worker(target, rule, count, args):
+    payload = {
+        "target": target,
+        "rule": rule,
+        "count": count,
+        "voice_click_limit": int(getattr(args, "voice_click_limit", 24) or 24),
+        "voice_menu_limit": int(getattr(args, "voice_menu_limit", 12) or 12),
+        "voice_probe_timeout": float(getattr(args, "voice_probe_timeout", 0.8) or 0.8),
+        "voice_final_timeout": float(getattr(args, "voice_final_timeout", 5.0) or 5.0),
+        "voice_left_click_first": bool(getattr(args, "voice_left_click_first", False)),
+    }
+    command = [sys.executable, os.path.abspath(__file__), "--voice-worker"]
+    timeout = max(8, int(getattr(args, "voice_worker_timeout", 35) or 35))
+    try:
+        result = subprocess.run(
+            command,
+            input=json.dumps(payload, ensure_ascii=False),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        output = (decode_process_output(exc.stdout) + decode_process_output(exc.stderr)).strip()
+        if output:
+            print(output[-2000:], flush=True)
+        raise RuntimeError(f"语音 UI 子进程超过 {timeout} 秒，已强制中断")
+    output = (result.stdout or "").strip()
+    if output:
+        print(output[-4000:], flush=True)
+    data = parse_voice_worker_result(output)
+    if result.stderr:
+        print(result.stderr.strip()[-2000:], file=sys.stderr, flush=True)
+    if result.returncode != 0 and not data:
+        raise RuntimeError(f"语音 UI 子进程退出码 {result.returncode}")
+    if not data:
+        raise RuntimeError("语音 UI 子进程没有返回结果")
+    if not data.get("ok"):
+        raise RuntimeError(str(data.get("error") or "语音 UI 子进程失败"))
+    return data["result"]
+
+
+def parse_voice_worker_result(output):
+    for line in reversed(str(output or "").splitlines()):
+        line = line.strip()
+        if not line.startswith("VOICE_WORKER_RESULT "):
+            continue
+        try:
+            return json.loads(line[len("VOICE_WORKER_RESULT "):])
+        except Exception:
+            return None
+    return None
+
+
+def decode_process_output(value):
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def voice_worker_main():
+    try:
+        payload = json.loads(sys.stdin.read() or "{}")
+        args = argparse.Namespace(
+            voice_click_limit=int(payload.get("voice_click_limit") or 24),
+            voice_menu_limit=int(payload.get("voice_menu_limit") or 12),
+            voice_probe_timeout=float(payload.get("voice_probe_timeout") or 0.8),
+            voice_final_timeout=float(payload.get("voice_final_timeout") or 5.0),
+            voice_left_click_first=bool(payload.get("voice_left_click_first")),
+        )
+        result = transcribe_recent_voices(
+            str(payload.get("target") or ""),
+            payload.get("rule") if isinstance(payload.get("rule"), dict) else {},
+            int(payload.get("count") or 1),
+            args,
+        )
+        print("VOICE_WORKER_RESULT " + json.dumps({"ok": True, "result": result}, ensure_ascii=False), flush=True)
+    except Exception as exc:
+        print("VOICE_WORKER_RESULT " + json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False), flush=True)
+        raise
 
 
 def is_expired_voice_task(task, ttl_minutes):
@@ -1411,7 +1520,8 @@ def trigger_voice_context_menu(bounds, used_points=None, limit=12):
         candidates = unique_points(candidates)[:max(1, int(limit))]
     print(f"voice menu scan: {len(candidates)} candidates", flush=True)
     last_error = None
-    for x, y in candidates:
+    for index, (x, y) in enumerate(candidates, start=1):
+        print(f"voice menu probe {index}/{len(candidates)} at {round(x)},{round(y)}", flush=True)
         point_key = (round(x), round(y))
         if point_key in used_points:
             continue
@@ -1659,6 +1769,11 @@ def is_non_wechat_transcription(text):
         "codex",
         "queuecount",
         "语音会明确失败或重试",
+        "微信语音输入文字",
+        "授权微信控制你的电脑",
+        "开启辅助功能权限",
+        "微信外也可以使用",
+        "开始说话",
     ]
     return any(normalize_match_text(item) in compact for item in blocked)
 

@@ -1398,6 +1398,8 @@ def transcribe_recent_voices(contact, rule=None, count=1, args=None):
         if bool(getattr(args, "voice_left_click_first", False)):
             text = click_visible_voice_to_text(bounds, before, used_points, click_limit, probe_timeout)
         if not text:
+            text = click_visible_voice_to_text_button(bounds, before, used_points, menu_limit, final_timeout)
+        if not text:
             try:
                 trigger_voice_context_menu(bounds, used_points, menu_limit)
                 text = wait_for_transcription(before, bounds, timeout_seconds=final_timeout)
@@ -1503,6 +1505,56 @@ def click_visible_voice_to_text(bounds, before_lines, used_points=None, limit=24
         if text:
             return text
     return ""
+
+
+def click_visible_voice_to_text_button(bounds, before_lines, used_points=None, limit=12, timeout_seconds=5.0):
+    used_points = used_points if used_points is not None else set()
+    candidates = voice_to_text_button_candidates(bounds, limit)
+    if candidates:
+        print(f"voice text-button scan: {len(candidates)} candidates", flush=True)
+    for index, (x, y, label) in enumerate(candidates, start=1):
+        point_key = (round(x), round(y))
+        if point_key in used_points:
+            continue
+        used_points.add(point_key)
+        print(f"voice text-button probe {index}/{len(candidates)} at {round(x)},{round(y)} {label}", flush=True)
+        click_at(x, y)
+        text = wait_for_transcription(before_lines, bounds, timeout_seconds=timeout_seconds)
+        if text:
+            return text
+    return ""
+
+
+def voice_to_text_button_candidates(bounds, limit=12):
+    boxes = read_chat_body_boxes(bounds)
+    candidates = []
+    min_y = bounds["top"] + bounds["height"] * 0.45
+    for item in boxes:
+        text = str(item.get("text") or "").strip()
+        compact = normalize_match_text(text)
+        if "转文字" not in compact:
+            continue
+        if "语音转文字" in compact:
+            continue
+        cx = bounds["left"] + item["cropX"] + item["x"] + (item["width"] / 2)
+        cy = bounds["top"] + item["cropY"] + item["y"] + (item["height"] / 2)
+        if cy < min_y:
+            continue
+        candidates.append((cx, cy, text))
+    candidates.sort(key=lambda row: row[1], reverse=True)
+    return unique_labeled_points(candidates)[:max(1, int(limit))]
+
+
+def unique_labeled_points(points):
+    seen = set()
+    unique = []
+    for x, y, label in points:
+        key = (round(x), round(y))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append((x, y, label))
+    return unique
 
 
 def trigger_voice_context_menu(bounds, used_points=None, limit=12):
@@ -1642,9 +1694,16 @@ def read_chat_body_boxes(bounds):
         subprocess.run(["/usr/sbin/screencapture", "-x", "-R", region, path], check=True, timeout=5)
         result = subprocess.run([OCR_BOXES_HELPER_BIN, path], check=True, capture_output=True, text=True, timeout=20)
         rows = json.loads(result.stdout or "[]")
+        image_width, image_height = image_pixel_size(path)
+        scale_x = image_width / max(1, float(crop["width"]))
+        scale_y = image_height / max(1, float(crop["height"]))
         for row in rows:
             row["cropX"] = crop["x"] - bounds["left"]
             row["cropY"] = crop["y"] - bounds["top"]
+            row["x"] = float(row.get("x") or 0) / scale_x
+            row["y"] = float(row.get("y") or 0) / scale_y
+            row["width"] = float(row.get("width") or 0) / scale_x
+            row["height"] = float(row.get("height") or 0) / scale_y
         return rows
     except Exception as exc:
         print(f"voice duration OCR failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
@@ -1654,6 +1713,27 @@ def read_chat_body_boxes(bounds):
             os.remove(path)
         except FileNotFoundError:
             pass
+
+
+def image_pixel_size(path):
+    result = subprocess.run(
+        ["/usr/bin/sips", "-g", "pixelWidth", "-g", "pixelHeight", path],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    width = 0
+    height = 0
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("pixelWidth:"):
+            width = int(line.split(":", 1)[1].strip())
+        elif line.startswith("pixelHeight:"):
+            height = int(line.split(":", 1)[1].strip())
+    if width <= 0 or height <= 0:
+        raise RuntimeError(f"无法读取截图尺寸: {path}")
+    return width, height
 
 
 def chat_body_crop(bounds):

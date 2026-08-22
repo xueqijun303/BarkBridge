@@ -106,6 +106,10 @@ def main():
     parser.add_argument("--disable-voice-transcribe", action="store_true", help="Disable experimental Mac WeChat voice-to-text tasks. Kept for compatibility; voice transcription is disabled by default.")
     parser.add_argument("--voice-max-retries", type=int, default=1, help="Maximum local retry attempts for experimental voice-to-text tasks.")
     parser.add_argument("--voice-task-ttl-minutes", type=int, default=10, help="Drop voice-to-text tasks older than this many minutes.")
+    parser.add_argument("--voice-click-limit", type=int, default=24, help="Maximum voice bubble click probes per voice task.")
+    parser.add_argument("--voice-menu-limit", type=int, default=12, help="Maximum voice context-menu probes per voice task.")
+    parser.add_argument("--voice-probe-timeout", type=float, default=0.8, help="Seconds to wait after each voice click probe.")
+    parser.add_argument("--voice-final-timeout", type=float, default=5.0, help="Seconds to wait after clicking the voice-to-text menu item.")
     parser.add_argument("--max-retries", type=int, default=5, help="Maximum local retry attempts for failed sends.")
     parser.add_argument("--send-shortcut", choices=["enter", "cmd-enter", "both"], default="both", help="WeChat send shortcut to use after pasting the reply.")
     parser.add_argument("--web-host", default="127.0.0.1", help="Local web console host.")
@@ -942,7 +946,7 @@ def handle_voice_transcribe_batch(contact, tasks, args):
     rule = resolve_contact_rule(contact)
     try:
         with SEND_LOCK:
-            result = transcribe_recent_voices(rule["target"], rule, len(tasks))
+            result = transcribe_recent_voices(rule["target"], rule, len(tasks), args)
         texts = [text.strip() for text in result["texts"] if text.strip()]
         if not texts:
             raise RuntimeError("未识别到微信转出的文字，可能没有点中语音消息或当前 Mac 微信未完成转文字")
@@ -1267,7 +1271,7 @@ def transcribe_latest_voice(contact, rule=None):
     return {"actual_title": result["actual_title"], "text": result["texts"][0]}
 
 
-def transcribe_recent_voices(contact, rule=None, count=1):
+def transcribe_recent_voices(contact, rule=None, count=1, args=None):
     bounds = get_wechat_window_bounds()
     select_contact_by_search(contact, bounds)
     actual_title = verify_selected_chat(contact, "语音转文字", bounds, rule or {})
@@ -1275,12 +1279,16 @@ def transcribe_recent_voices(contact, rule=None, count=1):
     before = read_chat_body_text(bounds)
     texts = []
     used_points = set()
+    click_limit = int(getattr(args, "voice_click_limit", 24) or 24)
+    menu_limit = int(getattr(args, "voice_menu_limit", 12) or 12)
+    probe_timeout = float(getattr(args, "voice_probe_timeout", 0.8) or 0.8)
+    final_timeout = float(getattr(args, "voice_final_timeout", 5.0) or 5.0)
     for _ in range(max(1, int(count))):
-        text = click_visible_voice_to_text(bounds, before, used_points)
+        text = click_visible_voice_to_text(bounds, before, used_points, click_limit, probe_timeout)
         if not text:
             try:
-                trigger_voice_context_menu(bounds, used_points)
-                text = wait_for_transcription(before, bounds, timeout_seconds=8)
+                trigger_voice_context_menu(bounds, used_points, menu_limit)
+                text = wait_for_transcription(before, bounds, timeout_seconds=final_timeout)
             except Exception:
                 text = ""
         if not text:
@@ -1306,39 +1314,50 @@ end tell
         pass
 
 
-def voice_click_candidates(bounds):
-    candidates = []
-    candidates.extend(voice_duration_candidates(bounds))
-    y_offsets = (145, 190, 240)
+def voice_click_candidates(bounds, limit=24):
+    duration_candidates = voice_duration_candidates(bounds)
+    if duration_candidates:
+        return unique_points(duration_candidates)[:max(1, int(limit))]
+    y_offsets = (145, 190)
     chat_left = 280
     chat_right = int(bounds["width"] - 80)
-    incoming_x_offsets = list(range(chat_left + 45, min(chat_left + 500, chat_right), 72))
+    incoming_x_offsets = list(range(chat_left + 80, min(chat_left + 430, chat_right), 100))
     outgoing_start = max(chat_left + 470, int(bounds["width"] * 0.58))
-    outgoing_x_offsets = list(range(outgoing_start, chat_right, 120))
+    outgoing_x_offsets = list(range(outgoing_start, chat_right, 150))
     x_offsets = incoming_x_offsets + outgoing_x_offsets
+    candidates = []
     for y_offset in y_offsets:
         for x_offset in x_offsets:
             candidates.append((bounds["left"] + x_offset, bounds["top"] + bounds["height"] - y_offset))
-    return candidates
+    return unique_points(candidates)[:max(1, int(limit))]
 
 
 def voice_duration_candidates(bounds):
     boxes = read_chat_body_boxes(bounds)
-    candidates = []
+    rows = []
     for item in boxes:
         text = str(item.get("text") or "").strip()
         if not is_voice_duration_text(text):
             continue
         cx = bounds["left"] + item["cropX"] + item["x"] + (item["width"] / 2)
         cy = bounds["top"] + item["cropY"] + item["y"] + (item["height"] / 2)
-        for dx in (-120, -80, -45, 0, 45, 80):
+        if cy < bounds["top"] + bounds["height"] * 0.45:
+            continue
+        rows.append({"text": text, "cx": cx, "cy": cy})
+    rows.sort(key=lambda row: row["cy"], reverse=True)
+    candidates = []
+    for row in rows[:4]:
+        cx = row["cx"]
+        cy = row["cy"]
+        print(f"voice duration OCR: {row['text']} at {round(cx)},{round(cy)}", flush=True)
+        for dx in (-115, -80, -45, -10, 30, 65):
             candidates.append((cx + dx, cy))
-        for dx in (-100, -55, 0, 55):
-            candidates.append((cx + dx, cy + 18))
-            candidates.append((cx + dx, cy - 18))
+        for dx in (-90, -50, -10, 35):
+            candidates.append((cx + dx, cy + 16))
+            candidates.append((cx + dx, cy - 16))
     if candidates:
         print(f"voice duration OCR candidates: {len(candidates)}", flush=True)
-    return candidates
+    return unique_points(candidates)
 
 
 def is_voice_duration_text(text):
@@ -1346,9 +1365,21 @@ def is_voice_duration_text(text):
     return bool(re.fullmatch(r"[0-9]{1,2}[\"”″秒]?", compact) or re.fullmatch(r"[0-9]{1,2}s", compact))
 
 
-def click_visible_voice_to_text(bounds, before_lines, used_points=None):
+def unique_points(points):
+    seen = set()
+    unique = []
+    for x, y in points:
+        key = (round(x), round(y))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append((x, y))
+    return unique
+
+
+def click_visible_voice_to_text(bounds, before_lines, used_points=None, limit=24, probe_timeout=0.8):
     used_points = used_points if used_points is not None else set()
-    candidates = voice_click_candidates(bounds)
+    candidates = voice_click_candidates(bounds, limit)
     print(f"voice click scan: {len(candidates)} candidates", flush=True)
     for x, y in candidates:
         point_key = (round(x), round(y))
@@ -1356,13 +1387,44 @@ def click_visible_voice_to_text(bounds, before_lines, used_points=None):
             continue
         used_points.add(point_key)
         click_at(x, y)
-        text = wait_for_transcription(before_lines, bounds, timeout_seconds=1.2)
+        text = wait_for_transcription(before_lines, bounds, timeout_seconds=probe_timeout)
         if text:
             return text
     return ""
 
 
-def trigger_voice_context_menu(bounds, used_points=None):
+def trigger_voice_context_menu(bounds, used_points=None, limit=12):
+    used_points = used_points if used_points is not None else set()
+    duration_points = voice_click_candidates(bounds, limit)
+    if duration_points:
+        candidates = duration_points
+    else:
+        candidates = []
+        chat_left = 280
+        chat_right = int(bounds["width"] - 80)
+        for y_offset in (145, 190):
+            for x_offset in range(chat_left + 90, min(chat_left + 450, chat_right), 120):
+                candidates.append((bounds["left"] + x_offset, bounds["top"] + bounds["height"] - y_offset))
+        candidates = unique_points(candidates)[:max(1, int(limit))]
+    print(f"voice menu scan: {len(candidates)} candidates", flush=True)
+    last_error = None
+    for x, y in candidates:
+        point_key = (round(x), round(y))
+        if point_key in used_points:
+            continue
+        used_points.add(point_key)
+        try:
+            right_click_at(x, y)
+            if click_voice_to_text_menu_item():
+                return
+        except Exception as exc:
+            last_error = exc
+    if last_error:
+        raise RuntimeError(f"无法打开语音转文字菜单: {last_error}") from last_error
+    raise RuntimeError("没有找到微信语音转文字菜单项")
+
+
+def trigger_voice_context_menu_legacy(bounds, used_points=None):
     used_points = used_points if used_points is not None else set()
     chat_left = 280
     chat_right = int(bounds["width"] - 80)

@@ -13,6 +13,11 @@
     <string>http://47.101.153.215:8787/poll?secret=PUT_SECRET_HERE</string>
     <string>--interval</string>
     <string>1</string>
+    <string>--enable-voice-transcribe</string>
+    <string>--voice-click-limit</string>
+    <string>24</string>
+    <string>--voice-menu-limit</string>
+    <string>12</string>
   </array>
   <key>RunAtLoad</key>
   <true/>

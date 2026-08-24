@@ -371,6 +371,23 @@ class RelayStore:
             )
         return self.config()
 
+    def show_contact(self, contact):
+        contact = str(contact or "").strip()
+        if not contact:
+            raise ValueError("联系人不能为空")
+        config = self.config()
+        hidden = [item for item in normalize_contact_list(config.get("hiddenContacts")) if item != contact]
+        pinned = normalize_contact_list(config.get("pinnedContacts"))
+        with self.lock, self.connect() as db:
+            db.executemany(
+                "insert or replace into config (key, value) values (?, ?)",
+                [
+                    ("pinnedContacts", json.dumps(pinned, ensure_ascii=False)),
+                    ("hiddenContacts", json.dumps(hidden, ensure_ascii=False)),
+                ],
+            )
+        return self.config()
+
     def contacts(self):
         config = self.config()
         hidden = set(config.get("hiddenContacts", []))
@@ -519,6 +536,8 @@ class RelayHandler(BaseHTTPRequestHandler):
             self.save_config()
         elif path == "/api/contacts/hide":
             self.hide_contact()
+        elif path == "/api/contacts/show":
+            self.show_contact()
         elif path == "/api/mac/status":
             self.save_mac_status()
         elif path == "/api/chat/clear":
@@ -643,6 +662,18 @@ class RelayHandler(BaseHTTPRequestHandler):
             self.json({"ok": False, "error": "联系人不能为空"}, 400)
             return
         config = self.server.store.hide_contact(contact)
+        self.json({"ok": True, "config": config, "contacts": self.server.store.contacts()})
+
+    def show_contact(self):
+        data = self.read_json_or_form()
+        if not self.allowed(str(data.get("secret", ""))):
+            self.json({"ok": False, "error": "密钥不正确"}, 403)
+            return
+        contact = str(data.get("contact", "")).strip()
+        if not contact:
+            self.json({"ok": False, "error": "联系人不能为空"}, 400)
+            return
+        config = self.server.store.show_contact(contact)
         self.json({"ok": True, "config": config, "contacts": self.server.store.contacts()})
 
     def clear_contact_history(self):
@@ -774,7 +805,7 @@ def admin_page(secret):
 
 
 def settings_page(secret):
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Settings</title><style>{SETTINGS_CSS}</style></head><body><main><header><h1>BarkBridge 设置</h1><nav><a href="/admin?secret={esc(secret)}">管理</a><a href="/chat?secret={esc(secret)}">聊天</a></nav></header><section><label>置顶联系人</label><textarea id="pinned" placeholder="每行一个联系人"></textarea></section><section><label>隐藏联系人</label><textarea id="hidden" placeholder="每行一个联系人"></textarea></section><button id="save">保存设置</button><p id="status"></p></main><script>const secret={json.dumps(secret)};{SETTINGS_JS}</script></body></html>"""
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Settings</title><style>{SETTINGS_CSS}</style></head><body><main><header><h1>BarkBridge 设置</h1><nav><a href="/admin?secret={esc(secret)}">管理</a><a href="/chat?secret={esc(secret)}">聊天</a></nav></header><section><label>置顶联系人</label><textarea id="pinned" placeholder="每行一个联系人"></textarea></section><section><label>隐藏联系人</label><textarea id="hidden" placeholder="每行一个联系人"></textarea><div class="chips" id="hiddenChips"></div></section><button id="save">保存设置</button><p id="status"></p></main><script>const secret={json.dumps(secret)};{SETTINGS_JS}</script></body></html>"""
 
 
 def reply_page(query):
@@ -908,14 +939,19 @@ SETTINGS_CSS = """
 main{max-width:680px;margin:0 auto;padding:calc(16px + env(safe-area-inset-top)) 14px calc(18px + env(safe-area-inset-bottom))}
 header{display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;margin-bottom:14px}h1{margin:0;font-size:24px}nav{display:flex;gap:12px}a{color:var(--green);font-weight:800;text-decoration:none}
 section{margin-top:14px}label{display:block;margin-bottom:8px;color:var(--muted);font-size:14px}textarea{width:100%;min-height:180px;resize:vertical;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--text);font:18px/1.5 inherit;padding:12px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.chip{border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--text);font:15px inherit;padding:8px 10px}.chip span{color:var(--muted);margin-left:6px}
 button{width:100%;height:52px;margin-top:16px;border:0;border-radius:8px;background:var(--green);color:#03150a;font-size:18px;font-weight:900}#status{min-height:24px;color:var(--muted)}
 """
 
 
 SETTINGS_JS = r"""
-const pinned=document.getElementById("pinned"),hidden=document.getElementById("hidden"),statusEl=document.getElementById("status");
+const pinned=document.getElementById("pinned"),hidden=document.getElementById("hidden"),hiddenChips=document.getElementById("hiddenChips"),statusEl=document.getElementById("status");
 function lines(value){return String(value||"").split(/\n/).map(v=>v.trim()).filter(Boolean)}
-async function load(){const r=await fetch("/api/config?secret="+encodeURIComponent(secret),{cache:"no-store"});const data=await r.json();const c=data.config||{};pinned.value=(c.pinnedContacts||[]).join("\n");hidden.value=(c.hiddenContacts||[]).join("\n")}
+function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function renderHiddenChips(){const items=lines(hidden.value);hiddenChips.innerHTML=items.map(name=>'<button class="chip" type="button" data-contact="'+esc(name)+'">'+esc(name)+'<span>恢复</span></button>').join("")||'<span class="chip">暂无隐藏联系人</span>';hiddenChips.querySelectorAll("button").forEach(button=>button.onclick=()=>restoreContact(button.dataset.contact))}
+async function load(){const r=await fetch("/api/config?secret="+encodeURIComponent(secret),{cache:"no-store"});const data=await r.json();const c=data.config||{};pinned.value=(c.pinnedContacts||[]).join("\n");hidden.value=(c.hiddenContacts||[]).join("\n");renderHiddenChips()}
+async function restoreContact(contact){statusEl.textContent="正在恢复";const r=await fetch("/api/contacts/show",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({secret,contact})});if(!r.ok){statusEl.textContent="恢复失败";return}await load();statusEl.textContent="已恢复"}
+hidden.addEventListener("input",renderHiddenChips);
 document.getElementById("save").onclick=async()=>{statusEl.textContent="正在保存";const r=await fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({secret,pinnedContacts:lines(pinned.value),hiddenContacts:lines(hidden.value)})});statusEl.textContent=r.ok?"已保存":"保存失败"};
 load();
 """

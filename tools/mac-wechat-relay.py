@@ -24,10 +24,14 @@ HISTORY_PATH = os.path.expanduser("~/.barkbridge/local_history.json")
 CONTACT_RULES_PATH = os.path.expanduser("~/.barkbridge/contact_rules.json")
 PROCESSED_PATH = os.path.expanduser("~/.barkbridge/processed_replies.json")
 CONTROL_PATH = os.path.expanduser("~/.barkbridge/control.json")
+VOICE_DEBUG_DIR = os.path.expanduser("~/.barkbridge/voice-debug")
 SEND_LOCK = threading.Lock()
 POLL_ERROR_LOG_EVERY_SECONDS = 60
 FAILURE_PAUSE_THRESHOLD = 3
 CONTACT_FAILURES = {}
+STATUS_REPORT_URL = ""
+STATUS_REPORT_SECRET = ""
+STATUS_REPORT_LAST_AT = 0.0
 RELAY_STATUS = {
     "started_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     "worker_wait_ms": None,
@@ -39,6 +43,9 @@ RELAY_STATUS = {
     "last_success": "",
     "last_error": "",
     "last_identified_title": "",
+    "last_voice_debug": "",
+    "voice_worker_last_at": "",
+    "voice_worker_last_result": "",
 }
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CLICK_HELPER_SOURCE = os.path.join(SCRIPT_DIR, "mac-click.swift")
@@ -117,6 +124,7 @@ def main():
     parser.add_argument("--voice-final-timeout", type=float, default=5.0, help="Seconds to wait after clicking the voice-to-text menu item.")
     parser.add_argument("--voice-left-click-first", action="store_true", help="Try left-click OCR probes before the context-menu path. Disabled by default to avoid long OCR scans.")
     parser.add_argument("--voice-worker-timeout", type=int, default=35, help="Hard timeout in seconds for the isolated voice UI worker process.")
+    parser.add_argument("--voice-debug-dir", default=VOICE_DEBUG_DIR, help="Directory for failed voice-to-text screenshots and OCR diagnostics.")
     parser.add_argument("--loop-timeout", type=int, default=45, help="Hard timeout in seconds for one poll/process loop.")
     parser.add_argument("--max-retries", type=int, default=5, help="Maximum local retry attempts for failed sends.")
     parser.add_argument("--send-shortcut", choices=["enter", "cmd-enter", "both"], default="both", help="WeChat send shortcut to use after pasting the reply.")
@@ -130,6 +138,7 @@ def main():
     if not args.no_web:
         start_web_console(args)
 
+    configure_status_reporting(args)
     configure_poll_mode(args)
     print(f"relay config: poll={args.poll_url} receipt={args.receipt_url or '-'}", flush=True)
 
@@ -190,6 +199,18 @@ def start_web_console(args):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     print(f"web: http://{args.web_host}:{args.web_port}/", flush=True)
+
+
+def configure_status_reporting(args):
+    global STATUS_REPORT_URL, STATUS_REPORT_SECRET
+    STATUS_REPORT_SECRET = query_param(args.poll_url, "secret")
+    ingest_url = args.ingest_url.strip() or ingest_url_from_poll(args.poll_url)
+    STATUS_REPORT_URL = urllib.parse.urlunparse(urllib.parse.urlparse(ingest_url)._replace(path="/api/mac/status"))
+    update_status(
+        process_id=os.getpid(),
+        voice_transcribe_enabled=voice_transcribe_enabled(args),
+        voice_debug_dir=os.path.expanduser(getattr(args, "voice_debug_dir", "") or VOICE_DEBUG_DIR),
+    )
 
 
 def make_web_handler(args):
@@ -380,6 +401,39 @@ def build_state():
 
 def update_status(**values):
     RELAY_STATUS.update({key: value for key, value in values.items() if value is not None})
+    maybe_report_status(values)
+
+
+def maybe_report_status(changed):
+    global STATUS_REPORT_LAST_AT
+    if not STATUS_REPORT_URL or not STATUS_REPORT_SECRET:
+        return
+    now = time.time()
+    important = any(key in changed for key in ("last_error", "last_success", "last_identified_title", "last_voice_debug", "voice_worker_last_result"))
+    if not important and now - STATUS_REPORT_LAST_AT < 8:
+        return
+    STATUS_REPORT_LAST_AT = now
+    payload = {
+        "secret": STATUS_REPORT_SECRET,
+        "status": {
+            **RELAY_STATUS,
+            "pending_count": len(load_pending()),
+            "processed_count": len(load_processed()),
+            "failure_counts": CONTACT_FAILURES,
+            "reported_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        },
+    }
+    try:
+        request = urllib.request.Request(
+            STATUS_REPORT_URL,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json; charset=utf-8", "User-Agent": "BarkBridge-MacRelay/1.0"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=3) as response:
+            response.read()
+    except Exception:
+        pass
 
 
 def default_control():
@@ -973,6 +1027,9 @@ def handle_voice_transcribe_batch(contact, tasks, args):
     try:
         with SEND_LOCK:
             result = run_voice_transcribe_worker(rule["target"], rule, len(tasks), args)
+        debug = result.get("debug") if isinstance(result, dict) else None
+        if debug:
+            update_status(last_voice_debug=format_voice_debug_summary(debug))
         texts = [text.strip() for text in result["texts"] if text.strip()]
         if not texts:
             raise RuntimeError("未识别到微信转出的文字，可能没有点中语音消息或当前 Mac 微信未完成转文字")
@@ -993,6 +1050,8 @@ def handle_voice_transcribe_batch(contact, tasks, args):
             last_success=f"语音转文字: {contact} x{len(texts)}",
             last_identified_title=result["actual_title"],
             last_error="",
+            voice_worker_last_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            voice_worker_last_result=f"{contact}: {len(texts)}/{len(tasks)}",
         )
         remaining = retry_voice_tasks(tasks[len(texts):], contact, "visible voice not found", args.voice_max_retries)
         print(f"voice-transcribed: {contact}: {len(texts)}/{len(tasks)}", flush=True)
@@ -1000,8 +1059,16 @@ def handle_voice_transcribe_batch(contact, tasks, args):
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
         remaining = retry_voice_tasks(tasks, contact, error, args.voice_max_retries)
-        update_status(last_error=f"语音转文字失败 {contact}: {error}")
-        send_receipt(args.receipt_url, "BarkBridge 语音转文字失败", f"{contact}\n{error}\n请在 Mac 微信手动点语音转文字。")
+        debug_note = RELAY_STATUS.get("last_voice_debug", "")
+        update_status(
+            last_error=f"语音转文字失败 {contact}: {error}",
+            voice_worker_last_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            voice_worker_last_result=f"{contact}: failed",
+        )
+        receipt_text = f"{contact}\n{error}\n请在 Mac 微信手动点语音转文字。"
+        if debug_note:
+            receipt_text += f"\n诊断: {debug_note}"
+        send_receipt(args.receipt_url, "BarkBridge 语音转文字失败", receipt_text)
         print(f"voice-transcribe failed: {contact}: {error}", file=sys.stderr, flush=True)
         return remaining
 
@@ -1034,6 +1101,7 @@ def run_voice_transcribe_worker(target, rule, count, args):
         "voice_probe_timeout": float(getattr(args, "voice_probe_timeout", 0.8) or 0.8),
         "voice_final_timeout": float(getattr(args, "voice_final_timeout", 5.0) or 5.0),
         "voice_left_click_first": bool(getattr(args, "voice_left_click_first", False)),
+        "voice_debug_dir": os.path.expanduser(getattr(args, "voice_debug_dir", "") or VOICE_DEBUG_DIR),
     }
     command = [sys.executable, os.path.abspath(__file__), "--voice-worker"]
     timeout = max(8, int(getattr(args, "voice_worker_timeout", 35) or 35))
@@ -1095,6 +1163,7 @@ def voice_worker_main():
             voice_probe_timeout=float(payload.get("voice_probe_timeout") or 0.8),
             voice_final_timeout=float(payload.get("voice_final_timeout") or 5.0),
             voice_left_click_first=bool(payload.get("voice_left_click_first")),
+            voice_debug_dir=os.path.expanduser(payload.get("voice_debug_dir") or VOICE_DEBUG_DIR),
         )
         result = transcribe_recent_voices(
             str(payload.get("target") or ""),
@@ -1409,7 +1478,10 @@ def transcribe_recent_voices(contact, rule=None, count=1, args=None):
             break
         texts.append(text)
         before = read_chat_body_text(bounds, ocr_timeout=8)
-    return {"actual_title": actual_title, "texts": texts}
+    debug = None
+    if len(texts) < max(1, int(count)):
+        debug = save_voice_debug_snapshot(bounds, contact, f"expected-{count}-got-{len(texts)}", args)
+    return {"actual_title": actual_title, "texts": texts, "debug": debug}
 
 
 def scroll_chat_to_bottom(bounds):
@@ -1713,6 +1785,76 @@ def read_chat_body_boxes(bounds):
             os.remove(path)
         except FileNotFoundError:
             pass
+
+
+def save_voice_debug_snapshot(bounds, contact, reason, args=None):
+    debug_dir = os.path.expanduser(getattr(args, "voice_debug_dir", "") or VOICE_DEBUG_DIR)
+    os.makedirs(debug_dir, exist_ok=True)
+    safe_contact = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff._-]+", "_", str(contact or "unknown")).strip("_") or "unknown"
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    base = f"voice-{stamp}-{safe_contact}"
+    image_path = os.path.join(debug_dir, base + ".png")
+    boxes_path = os.path.join(debug_dir, base + ".json")
+    crop = chat_body_crop(bounds)
+    region = f"{int(crop['x'])},{int(crop['y'])},{int(crop['width'])},{int(crop['height'])}"
+    boxes = []
+    try:
+        subprocess.run(["/usr/sbin/screencapture", "-x", "-R", region, image_path], check=True, timeout=5)
+        ensure_ocr_boxes_helper()
+        result = subprocess.run([OCR_BOXES_HELPER_BIN, image_path], check=True, capture_output=True, text=True, timeout=20)
+        boxes = json.loads(result.stdout or "[]")
+        image_width, image_height = image_pixel_size(image_path)
+        scale_x = image_width / max(1, float(crop["width"]))
+        scale_y = image_height / max(1, float(crop["height"]))
+        for row in boxes:
+            row["screenX"] = bounds["left"] + crop["x"] - bounds["left"] + (float(row.get("x") or 0) / scale_x) + (float(row.get("width") or 0) / scale_x / 2)
+            row["screenY"] = bounds["top"] + crop["y"] - bounds["top"] + (float(row.get("y") or 0) / scale_y) + (float(row.get("height") or 0) / scale_y / 2)
+        with open(boxes_path, "w", encoding="utf-8") as fh:
+            json.dump(
+                {
+                    "createdAt": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "contact": contact,
+                    "reason": reason,
+                    "bounds": bounds,
+                    "crop": crop,
+                    "image": image_path,
+                    "boxes": boxes,
+                },
+                fh,
+                ensure_ascii=False,
+                indent=2,
+            )
+        trim_voice_debug_dir(debug_dir)
+        print(f"voice debug saved: {image_path}", flush=True)
+        return {"image": image_path, "boxes": boxes_path, "reason": reason}
+    except Exception as exc:
+        print(f"voice debug save failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        return {"error": f"{type(exc).__name__}: {exc}", "reason": reason}
+
+
+def trim_voice_debug_dir(debug_dir, keep=30):
+    try:
+        files = [
+            os.path.join(debug_dir, name)
+            for name in os.listdir(debug_dir)
+            if name.startswith("voice-") and (name.endswith(".png") or name.endswith(".json"))
+        ]
+        files.sort(key=lambda path: os.path.getmtime(path), reverse=True)
+        for path in files[max(0, int(keep)) * 2:]:
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+    except Exception:
+        pass
+
+
+def format_voice_debug_summary(debug):
+    if not isinstance(debug, dict):
+        return ""
+    if debug.get("image"):
+        return str(debug.get("image"))
+    return str(debug.get("error") or debug.get("reason") or "")
 
 
 def image_pixel_size(path):

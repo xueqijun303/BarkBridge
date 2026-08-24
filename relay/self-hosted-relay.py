@@ -305,16 +305,24 @@ class RelayStore:
             return row[0]
 
     def status(self):
+        mac_status = self.get_meta("macStatus", {}) or {}
+        mac_reported_at = int(self.get_meta("macStatusAt", 0) or 0)
+        mac_last_poll_at = int(self.get_meta("macLastPollAt", 0) or 0)
+        current_time = now_ms()
         return {
             "ok": True,
-            "time": now_ms(),
+            "time": current_time,
             "queueCount": self.queue_count(),
             "contactCount": len(self.contacts()),
             "historyLimitPerContact": HISTORY_RETAIN_PER_CONTACT,
             "historyLimitTotal": HISTORY_RETAIN_TOTAL,
             "androidLastUploadAt": self.latest_history_time("android"),
             "outgoingLastQueuedAt": self.latest_history_time("compose") or self.latest_history_time("reply"),
-            "macLastPollAt": int(self.get_meta("macLastPollAt", 0) or 0),
+            "macLastPollAt": mac_last_poll_at,
+            "macStatusAt": mac_reported_at,
+            "macStatus": mac_status,
+            "macOnline": bool(mac_last_poll_at and current_time - mac_last_poll_at <= 60000),
+            "macStatusFresh": bool(mac_reported_at and current_time - mac_reported_at <= 60000),
         }
 
     def config(self):
@@ -394,7 +402,7 @@ class RelayHandler(BaseHTTPRequestHandler):
     server_version = "BarkBridgeRelay/1.0"
 
     def do_HEAD(self):
-        if self.path_only() in {"/", "/reply", "/compose", "/control", "/chat", "/settings", "/health", "/api/status"}:
+        if self.path_only() in {"/", "/reply", "/compose", "/control", "/admin", "/chat", "/settings", "/health", "/api/status"}:
             self.send_response(200)
             content_type = "application/json; charset=utf-8" if self.path_only() == "/health" else "text/html; charset=utf-8"
             self.send_header("Content-Type", content_type)
@@ -421,6 +429,11 @@ class RelayHandler(BaseHTTPRequestHandler):
                 self.html(error_page("密钥不正确", "请使用带 secret 参数的 BarkBridge 控制页面。"), 403)
             else:
                 self.html(control_page(query.get("secret", [""])[0]))
+        elif path == "/admin":
+            if not self.allowed(query.get("secret", [""])[0]):
+                self.html(error_page("密钥不正确", "请使用带 secret 参数的 BarkBridge 管理页面。"), 403)
+            else:
+                self.html(admin_page(query.get("secret", [""])[0]))
         elif path == "/settings":
             if not self.allowed(query.get("secret", [""])[0]):
                 self.html(error_page("密钥不正确", "请使用带 secret 参数的 BarkBridge 设置页面。"), 403)
@@ -485,6 +498,8 @@ class RelayHandler(BaseHTTPRequestHandler):
             self.save_control()
         elif path == "/api/config":
             self.save_config()
+        elif path == "/api/mac/status":
+            self.save_mac_status()
         elif path == "/api/chat/clear":
             self.clear_contact_history()
         else:
@@ -609,6 +624,28 @@ class RelayHandler(BaseHTTPRequestHandler):
         deleted = self.server.store.delete_history_for_contact(contact)
         self.json({"ok": True, "deleted": deleted, "contact": contact})
 
+    def save_mac_status(self):
+        data = self.read_json()
+        secret = str(data.get("secret", "")).strip() or self.query().get("secret", [""])[0]
+        if not self.allowed(secret):
+            self.json({"ok": False, "error": "密钥不正确"}, 403)
+            return
+        status = data.get("status")
+        if not isinstance(status, dict):
+            self.json({"ok": False, "error": "status 必须是对象"}, 400)
+            return
+        allowed = {
+            "started_at", "worker_wait_ms", "poll_timeout", "poll_mode", "last_poll_at",
+            "last_reply_at", "last_send_at", "last_success", "last_error",
+            "last_identified_title", "pending_count", "processed_count", "failure_counts",
+            "reported_at", "process_id", "voice_transcribe_enabled", "voice_debug_dir",
+            "last_voice_debug", "voice_worker_last_at", "voice_worker_last_result",
+        }
+        clean = {key: status.get(key) for key in allowed if key in status}
+        self.server.store.set_meta("macStatus", clean)
+        self.server.store.set_meta("macStatusAt", now_ms())
+        self.json({"ok": True})
+
     def enqueue(self, contact, text, source, token):
         item = {
             "id": make_id(),
@@ -696,11 +733,15 @@ def home_page():
 
 
 def control_page(secret):
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BarkBridge Control</title><style>{CONTROL_CSS}</style></head><body><main><header><h1>BarkBridge Control</h1><a href="/chat?secret={esc(secret)}">返回聊天</a></header><section class="grid" id="status"></section><p class="message">这些指令会进入中转队列，由 Mac relay 下一次轮询后执行。</p><form method="post" action="/control"><input type="hidden" name="secret" value="{esc(secret)}"><button name="action" value="pause">暂停 Mac relay</button><button name="action" value="resume">恢复 Mac relay</button><button name="action" value="auto_send_on">开启自动发送</button><button name="action" value="auto_send_off">关闭自动发送</button><button name="action" value="manual_only_on">开启仅手动模式</button><button name="action" value="manual_only_off">关闭仅手动模式</button></form></main><script>const secret={json.dumps(secret)};{CONTROL_JS}</script></body></html>"""
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BarkBridge Control</title><style>{CONTROL_CSS}</style></head><body><main><header><h1>BarkBridge Control</h1><nav><a href="/admin?secret={esc(secret)}">管理</a><a href="/chat?secret={esc(secret)}">聊天</a></nav></header><section class="grid" id="status"></section><p class="message">这些指令会进入中转队列，由 Mac relay 下一次轮询后执行。</p><form method="post" action="/control"><input type="hidden" name="secret" value="{esc(secret)}"><button name="action" value="pause">暂停 Mac relay</button><button name="action" value="resume">恢复 Mac relay</button><button name="action" value="auto_send_on">开启自动发送</button><button name="action" value="auto_send_off">关闭自动发送</button><button name="action" value="manual_only_on">开启仅手动模式</button><button name="action" value="manual_only_off">关闭仅手动模式</button></form></main><script>const secret={json.dumps(secret)};{CONTROL_JS}</script></body></html>"""
+
+
+def admin_page(secret):
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Admin</title><style>{ADMIN_CSS}</style></head><body><main><header><h1>BarkBridge 管理</h1><nav><a href="/chat?secret={esc(secret)}">聊天</a><a href="/control?secret={esc(secret)}">控制</a><a href="/settings?secret={esc(secret)}">设置</a></nav></header><section class="hero" id="overall">正在读取状态</section><section class="grid" id="cards"></section><section class="panel"><h2>Mac relay 详情</h2><pre id="mac"></pre></section></main><script>const secret={json.dumps(secret)};{ADMIN_JS}</script></body></html>"""
 
 
 def settings_page(secret):
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Settings</title><style>{SETTINGS_CSS}</style></head><body><main><header><h1>BarkBridge 设置</h1><a href="/chat?secret={esc(secret)}">返回聊天</a></header><section><label>置顶联系人</label><textarea id="pinned" placeholder="每行一个联系人"></textarea></section><section><label>隐藏联系人</label><textarea id="hidden" placeholder="每行一个联系人"></textarea></section><button id="save">保存设置</button><p id="status"></p></main><script>const secret={json.dumps(secret)};{SETTINGS_JS}</script></body></html>"""
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Settings</title><style>{SETTINGS_CSS}</style></head><body><main><header><h1>BarkBridge 设置</h1><nav><a href="/admin?secret={esc(secret)}">管理</a><a href="/chat?secret={esc(secret)}">聊天</a></nav></header><section><label>置顶联系人</label><textarea id="pinned" placeholder="每行一个联系人"></textarea></section><section><label>隐藏联系人</label><textarea id="hidden" placeholder="每行一个联系人"></textarea></section><button id="save">保存设置</button><p id="status"></p></main><script>const secret={json.dumps(secret)};{SETTINGS_JS}</script></body></html>"""
 
 
 def reply_page(query):
@@ -726,7 +767,7 @@ def compose_like_page(title, mode, secret, token, selected):
 
 
 def chat_page(secret, selected):
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Chat</title><style>{CHAT_CSS}</style></head><body><div class="app"><header><div class="topbar"><h1 id="title">BarkBridge Chat</h1><a class="settings" href="/settings?secret={esc(secret)}">设置</a></div><input id="search" class="search" placeholder="搜索联系人"><div class="hint">只显示 BarkBridge 启用后经手的完整消息</div></header><nav class="contacts" id="contacts"></nav><div class="chat-tools"><button id="latestChat" class="ghost primary" type="button">回到最新</button><button id="clearChat" class="ghost" type="button">清空当前联系人记录</button></div><main class="messages" id="messages"></main><form id="form"><textarea id="text" placeholder="输入回复内容"></textarea><button class="send" type="submit">发送</button></form></div><script>const secret={json.dumps(secret)};let selected={json.dumps(selected)};{CHAT_JS}</script></body></html>"""
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Chat</title><style>{CHAT_CSS}</style></head><body><div class="app"><header><div class="topbar"><h1 id="title">BarkBridge Chat</h1><nav><a class="settings" href="/admin?secret={esc(secret)}">管理</a><a class="settings" href="/settings?secret={esc(secret)}">设置</a></nav></div><input id="search" class="search" placeholder="搜索联系人"><div class="hint">只显示 BarkBridge 启用后经手的完整消息</div></header><nav class="contacts" id="contacts"></nav><div class="chat-tools"><button id="latestChat" class="ghost primary" type="button">回到最新</button><button id="clearChat" class="ghost" type="button">清空当前联系人记录</button></div><main class="messages" id="messages"></main><form id="form"><textarea id="text" placeholder="输入回复内容"></textarea><button class="send" type="submit">发送</button></form></div><script>const secret={json.dumps(secret)};let selected={json.dumps(selected)};{CHAT_JS}</script></body></html>"""
 
 
 BASE_CSS = """
@@ -740,6 +781,7 @@ button{width:100%;height:48px;margin-top:12px;border:0;border-radius:8px;backgro
 CONTROL_CSS = """
 body{margin:0;background:#f3f7f6;color:#17201f;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 main{max-width:680px;margin:0 auto;padding:28px 18px}header{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}h1{font-size:24px;margin:0}a{color:#007670;font-weight:800;text-decoration:none}
+nav{display:flex;gap:12px;align-items:center}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}.metric{border:1px solid #d5e4e1;background:#fff;border-radius:8px;padding:12px}.metric strong{display:block;font-size:13px;color:#667370;margin-bottom:6px}.metric span{font-size:17px;font-weight:800;overflow-wrap:anywhere}
 .message{padding:14px;border:1px solid #d5e4e1;background:#fff;border-radius:8px;line-height:1.5}button{width:100%;height:48px;margin-top:12px;border:0;border-radius:8px;background:#007670;color:#fff;font-family:inherit;font-size:16px;font-weight:600}
 @media(max-width:520px){.grid{grid-template-columns:1fr}}
@@ -755,13 +797,49 @@ loadStatus();setInterval(loadStatus,5000);
 """
 
 
+ADMIN_CSS = """
+:root{--bg:#f4f7f6;--panel:#fff;--line:#d8e4e1;--text:#17201f;--muted:#667370;--green:#007670;--ok:#0a8f4d;--warn:#b36b00;--bad:#b3261e}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
+main{max-width:860px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top)) 14px calc(18px + env(safe-area-inset-bottom))}
+header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;margin-bottom:14px}h1{font-size:25px;margin:0}h2{font-size:18px;margin:0 0 10px}
+nav{display:flex;gap:12px;align-items:center}a{color:var(--green);font-weight:800;text-decoration:none}
+.hero{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:14px 16px;margin-bottom:12px;font-size:18px;font-weight:900}
+.hero.ok{border-color:#a7d8bd;color:var(--ok)}.hero.warn{border-color:#e5c17c;color:var(--warn)}.hero.bad{border-color:#e2aaa6;color:var(--bad)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card,.panel{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:12px}
+.card strong{display:block;color:var(--muted);font-size:13px;margin-bottom:6px}.card span{display:block;font-size:17px;font-weight:850;overflow-wrap:anywhere}.card small{display:block;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}
+.okText{color:var(--ok)}.warnText{color:var(--warn)}.badText{color:var(--bad)}
+.panel{margin-top:12px}pre{margin:0;white-space:pre-wrap;word-break:break-word;color:#25302e;font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+@media(max-width:620px){header{grid-template-columns:1fr}.grid{grid-template-columns:1fr}nav{justify-content:flex-start}.hero{font-size:17px}}
+"""
+
+
+ADMIN_JS = r"""
+const overall=document.getElementById("overall"),cardsEl=document.getElementById("cards"),macEl=document.getElementById("mac");
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function fmt(ts){if(!ts)return "-";const d=new Date(ts);return String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0")}
+function age(ts,now){if(!ts)return "-";const sec=Math.max(0,Math.round((now-ts)/1000));if(sec<60)return sec+" 秒前";const min=Math.round(sec/60);if(min<60)return min+" 分钟前";return Math.round(min/60)+" 小时前"}
+function card(k,v,sub,cls=""){return '<article class="card"><strong>'+esc(k)+'</strong><span class="'+cls+'">'+esc(v)+'</span>'+(sub?'<small>'+esc(sub)+'</small>':'')+'</article>'}
+async function load(){const r=await fetch("/api/status?secret="+encodeURIComponent(secret),{cache:"no-store"});const s=await r.json();const m=s.macStatus||{};const ok=s.macOnline&&s.macStatusFresh&&!m.last_error;overall.className="hero "+(ok?"ok":(s.macOnline?"warn":"bad"));overall.textContent=ok?"运行正常":(s.macOnline?"Mac 在线，但存在需要关注的状态":"Mac relay 可能离线或轮询中断");const rows=[
+["中继服务","运行中",fmt(s.time),"okText"],
+["Mac 轮询",s.macOnline?"在线":"异常",age(s.macLastPollAt,s.time),s.macOnline?"okText":"badText"],
+["Mac 状态回传",s.macStatusFresh?"新鲜":"过期",age(s.macStatusAt,s.time),s.macStatusFresh?"okText":"warnText"],
+["Android 上传",s.androidLastUploadAt?age(s.androidLastUploadAt,s.time):"-",fmt(s.androidLastUploadAt),s.androidLastUploadAt?"okText":"warnText"],
+["待处理队列",String(s.queueCount),s.queueCount>0?"等待 Mac 轮询":"无积压",s.queueCount>0?"warnText":"okText"],
+["联系人数量",String(s.contactCount),"聊天面板可见联系人",""],
+["语音转文字",m.voice_transcribe_enabled===false?"关闭":"开启",m.voice_worker_last_result||"-",m.voice_transcribe_enabled===false?"warnText":"okText"],
+["最近错误",m.last_error||"-",m.last_voice_debug||"",m.last_error?"badText":"okText"]
+];cardsEl.innerHTML=rows.map(x=>card(...x)).join("");macEl.textContent=JSON.stringify(m,null,2)}
+load();setInterval(load,5000);
+"""
+
+
 CHAT_CSS = """
 :root{color-scheme:dark;--bg:#151719;--panel:#202327;--line:#34383d;--text:#f4f5f6;--muted:#a9b0b6;--green:#07c160;--in:#2b2f33;--out:#12b969}
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:17px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
 .app{height:100dvh;min-height:100svh;display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto;overflow:hidden}
 header{z-index:2;background:var(--panel);border-bottom:1px solid var(--line);padding:calc(12px + env(safe-area-inset-top)) 14px 12px}
 h1{margin:0;font-size:21px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hint{color:var(--muted);font-size:13px;margin-top:4px}
-.topbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center}.settings{color:var(--green);font-size:15px;font-weight:800;text-decoration:none}.ghost{height:38px;border:1px solid #46505a;border-radius:8px;background:#2a2d31;color:var(--text);font:15px inherit;font-weight:800;padding:0 12px}.search{width:100%;height:42px;margin-top:10px;border:1px solid var(--line);border-radius:8px;background:#2a2d31;color:var(--text);font:17px inherit;padding:0 12px}
+.topbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center}.topbar nav{display:flex;gap:12px}.settings{color:var(--green);font-size:15px;font-weight:800;text-decoration:none}.ghost{height:38px;border:1px solid #46505a;border-radius:8px;background:#2a2d31;color:var(--text);font:15px inherit;font-weight:800;padding:0 12px}.search{width:100%;height:42px;margin-top:10px;border:1px solid var(--line);border-radius:8px;background:#2a2d31;color:var(--text);font:17px inherit;padding:0 12px}
 .contacts{display:flex;gap:8px;overflow:auto;padding:10px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
 .chat-tools{display:grid;grid-template-columns:112px 1fr;gap:8px;background:var(--panel);border-bottom:1px solid var(--line);padding:8px 12px}.chat-tools .ghost{width:100%}.ghost.primary{background:var(--green);border-color:var(--green);color:#03150a}
 .contact{white-space:nowrap;border:1px solid var(--line);border-radius:999px;background:#2a2d31;color:var(--text);padding:8px 12px;font:15px inherit}.contact.active{background:var(--green);color:#03150a;border-color:var(--green);font-weight:800}
@@ -790,7 +868,7 @@ SETTINGS_CSS = """
 :root{color-scheme:dark;--bg:#151719;--panel:#202327;--line:#34383d;--text:#f4f5f6;--muted:#a9b0b6;--green:#07c160}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:18px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
 main{max-width:680px;margin:0 auto;padding:calc(16px + env(safe-area-inset-top)) 14px calc(18px + env(safe-area-inset-bottom))}
-header{display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;margin-bottom:14px}h1{margin:0;font-size:24px}a{color:var(--green);font-weight:800;text-decoration:none}
+header{display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;margin-bottom:14px}h1{margin:0;font-size:24px}nav{display:flex;gap:12px}a{color:var(--green);font-weight:800;text-decoration:none}
 section{margin-top:14px}label{display:block;margin-bottom:8px;color:var(--muted);font-size:14px}textarea{width:100%;min-height:180px;resize:vertical;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--text);font:18px/1.5 inherit;padding:12px}
 button{width:100%;height:52px;margin-top:16px;border:0;border-radius:8px;background:var(--green);color:#03150a;font-size:18px;font-weight:900}#status{min-height:24px;color:var(--muted)}
 """

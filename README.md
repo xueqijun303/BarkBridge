@@ -1,4 +1,4 @@
-# BarkBridge v1.3.12
+# BarkBridge v1.3.13
 
 BarkBridge 是一款 Android 工具，可以把选定的微信通知和来电事件转发到 Bark。
 
@@ -6,17 +6,17 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 
 ## 当前状态 / Current Status
 
-- 当前稳定版本：`v1.3.12`。
+- 当前稳定版本：`v1.3.13`。
 - Android 端已切换到阿里云自托管中继，默认地址为 `http://47.101.153.215:8787`。
 - iPhone 端统一使用 `/chat` 聊天/回复页面查看完整消息、选择联系人和提交回复。
 - Mac 端通过轮询中继服务接收回复指令，并使用 Mac 微信客户端代发。
-- 自托管中继已验证 `/chat`、`/settings`、`/control`、`/api/status` 和 `/health` 可用。
+- 自托管中继已验证 `/chat`、`/admin`、`/settings`、`/control`、`/api/status` 和 `/health` 可用。
 
-- Current stable version: `v1.3.12`.
+- Current stable version: `v1.3.13`.
 - Android now uses the Aliyun self-hosted relay by default at `http://47.101.153.215:8787`.
 - iPhone uses the unified `/chat` page to view full messages, choose contacts, and submit replies.
 - Mac polls the relay service for reply commands and sends them through Mac WeChat.
-- The self-hosted relay has verified `/chat`, `/settings`, `/control`, `/api/status`, and `/health`.
+- The self-hosted relay has verified `/chat`, `/admin`, `/settings`, `/control`, `/api/status`, and `/health`.
 
 ## 功能 / Features
 
@@ -38,6 +38,8 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 单联系人聊天记录清空 / Per-contact chat-history clearing
 - 每联系人最近 100 条自动保留 / Automatic per-contact retention for the latest 100 messages
 - 中继状态面板和健康检查 / Relay status dashboard and health check
+- 自托管管理页和 Mac 状态回传 / Self-hosted admin page and Mac status reporting
+- 语音转文字失败截图诊断 / Voice-to-text failure screenshot diagnostics
 - 勿扰时段和重要消息例外 / Quiet hours with important-message exceptions
 - 自定义 Bark 服务器、分组、铃声、图标和通知级别 / Custom Bark server, group, sound, icon, and interruption level
 - 配置导入导出 / Configuration import and export
@@ -60,6 +62,18 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 - 支持本地属性或 GitHub Secrets 发布签名 / Optional release signing through local properties or GitHub Secrets
 
 ## 最新变化 / What's New
+
+### v1.3.13
+
+- 新增自托管中继管理页 `/admin?secret=...`，集中显示中继、Android 上传、Mac 轮询、Mac 状态回传、待处理队列和最近错误。
+- Mac relay 会向自托管中继回传运行状态，包括轮询模式、进程号、语音转文字开关、待处理队列、最近发送、最近识别标题和最近错误。
+- 微信语音转文字失败时，Mac relay 会在 `~/.barkbridge/voice-debug/` 保存聊天区域截图和 OCR 框 JSON，方便定位点击或识别问题。
+- 聊天、控制和设置页面增加管理页入口。
+
+- Added the self-hosted admin page `/admin?secret=...` for relay, Android upload, Mac polling, Mac status reporting, pending queue, and latest error visibility.
+- Mac relay now reports runtime status back to the self-hosted relay, including poll mode, process id, voice-to-text switch, pending queue, last send, last recognized title, and latest error.
+- When WeChat voice-to-text fails, Mac relay saves a chat-area screenshot and OCR-box JSON under `~/.barkbridge/voice-debug/` for diagnosis.
+- Added admin links to the chat, control, and settings pages.
 
 ### Mac relay update
 
@@ -308,9 +322,9 @@ GitHub Actions 会生成以下 APK 产物名：
 GitHub Actions produces APK artifacts with these names:
 
 ```text
-BarkBridge_v1.3.12-debug.apk
-BarkBridge_v1.3.12-release.apk
-BarkBridge_v1.3.12-release-unsigned.apk
+BarkBridge_v1.3.13-debug.apk
+BarkBridge_v1.3.13-release.apk
+BarkBridge_v1.3.13-release-unsigned.apk
 ```
 
 Debug APK 可直接用于测试安装。未签名 release APK 需要签名后再公开分发；如果配置了签名 Secrets，Actions 会生成已签名 release APK。
@@ -346,9 +360,9 @@ Notification listener access must also be enabled manually in Android settings.
 
 ## 息屏推送 / Screen-Off Delivery
 
-BarkBridge v1.3.12 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
+BarkBridge v1.3.13 的目标是在手机息屏或锁屏时继续转发微信通知、其他通知和来电事件。
 
-BarkBridge v1.3.12 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
+BarkBridge v1.3.13 is designed to keep forwarding WeChat notifications, other notifications, and incoming-call events while the phone screen is off or locked.
 
 App 使用前台服务、通知监听重绑、唤醒锁、后台联网状态检测和失败补发队列，让 Bark 推送在息屏期间尽量保持可用。
 
@@ -477,9 +491,9 @@ Limitation: the chat panel only stores notification text captured after BarkBrid
 
 ## 自托管中继 / Self-Hosted Relay
 
-如果 Android 手机直连 `workers.dev` 不稳定，可以把中继服务部署到自己的服务器。自托管版本提供 `/ingest`、`/chat`、`/settings`、`/send`、`/poll`、`/control`、`/api/status` 和 `/health` 等路径，Android 和 Mac 只需要替换域名/IP。
+如果 Android 手机直连 `workers.dev` 不稳定，可以把中继服务部署到自己的服务器。自托管版本提供 `/ingest`、`/chat`、`/admin`、`/settings`、`/send`、`/poll`、`/control`、`/api/status` 和 `/health` 等路径，Android 和 Mac 只需要替换域名/IP。
 
-If Android cannot reliably reach `workers.dev`, deploy the relay on your own server. The self-hosted version provides paths such as `/ingest`, `/chat`, `/settings`, `/send`, `/poll`, `/control`, `/api/status`, and `/health`, so Android and Mac only need a URL change.
+If Android cannot reliably reach `workers.dev`, deploy the relay on your own server. The self-hosted version provides paths such as `/ingest`, `/chat`, `/admin`, `/settings`, `/send`, `/poll`, `/control`, `/api/status`, and `/health`, so Android and Mac only need a URL change.
 
 默认部署端口是 `8787`，不会占用常见的 `80`、`443` 或 `8001`：
 
@@ -506,8 +520,9 @@ Useful pages:
 
 ```text
 聊天/回复页面: http://47.101.153.215:8787/chat?secret=your-secret
+管理状态面板: http://47.101.153.215:8787/admin?secret=your-secret
 联系人显示设置: http://47.101.153.215:8787/settings?secret=your-secret
-运行状态面板: http://47.101.153.215:8787/control?secret=your-secret
+远程控制页面: http://47.101.153.215:8787/control?secret=your-secret
 健康检查接口: http://47.101.153.215:8787/health
 状态 JSON 接口: http://47.101.153.215:8787/api/status?secret=your-secret
 ```
@@ -565,6 +580,22 @@ picked: 联系人: 回复内容
 sent: 联系人
 queued retry 1/5: 联系人
 voice-transcribed: 联系人: 转文字内容
+```
+
+语音转文字失败时，Mac relay 会保留最近的诊断截图和 OCR 框：
+
+When voice-to-text fails, Mac relay keeps recent diagnostic screenshots and OCR boxes:
+
+```text
+~/.barkbridge/voice-debug/
+```
+
+自托管管理页会显示最近一次诊断截图路径：
+
+The self-hosted admin page shows the latest diagnostic screenshot path:
+
+```text
+http://47.101.153.215:8787/admin?secret=your-secret
 ```
 
 首次运行时，macOS 通常会要求给运行脚本的 App 授予“辅助功能”权限。路径：
@@ -648,6 +679,6 @@ base64 -i barkbridge-release.jks
 
 ## GitHub Releases
 
-推送类似 `v1.3.12` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
+推送类似 `v1.3.13` 的 tag 后，GitHub Actions 会自动构建 APK 并发布到 GitHub Release 页面。
 
-Pushing a tag such as `v1.3.12` builds APKs and publishes them to the GitHub Release page automatically.
+Pushing a tag such as `v1.3.13` builds APKs and publishes them to the GitHub Release page automatically.

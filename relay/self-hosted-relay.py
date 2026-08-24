@@ -728,7 +728,7 @@ def home_page():
     return simple_page(
         "BarkBridge Relay",
         "BarkBridge Relay",
-        "中继服务正在运行。可用路径：/chat?secret=你的密钥 /settings?secret=你的密钥 /control?secret=你的密钥 /poll?secret=你的密钥&waitMs=0",
+        "中继服务正在运行。可用路径：/chat?secret=你的密钥 /admin?secret=你的密钥 /settings?secret=你的密钥 /control?secret=你的密钥 /poll?secret=你的密钥&waitMs=0",
     )
 
 
@@ -737,7 +737,7 @@ def control_page(secret):
 
 
 def admin_page(secret):
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Admin</title><style>{ADMIN_CSS}</style></head><body><main><header><h1>BarkBridge 管理</h1><nav><a href="/chat?secret={esc(secret)}">聊天</a><a href="/control?secret={esc(secret)}">控制</a><a href="/settings?secret={esc(secret)}">设置</a></nav></header><section class="hero" id="overall">正在读取状态</section><section class="grid" id="cards"></section><section class="panel"><h2>Mac relay 详情</h2><pre id="mac"></pre></section></main><script>const secret={json.dumps(secret)};{ADMIN_JS}</script></body></html>"""
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Admin</title><style>{ADMIN_CSS}</style></head><body><main><header><h1>BarkBridge 管理</h1><nav><a href="/chat?secret={esc(secret)}">聊天</a><a href="/control?secret={esc(secret)}">控制</a><a href="/settings?secret={esc(secret)}">设置</a></nav></header><section class="hero" id="overall">正在读取状态</section><section class="actions"><button data-action="resume">恢复</button><button data-action="pause">暂停</button><button data-action="auto_send_on">自动发送开</button><button data-action="auto_send_off">自动发送关</button></section><p class="toast" id="toast"></p><section class="grid" id="cards"></section><section class="panel"><h2>最近记录</h2><div class="events" id="events"></div></section><section class="panel"><h2>Mac relay 详情</h2><pre id="mac"></pre></section></main><script>const secret={json.dumps(secret)};{ADMIN_JS}</script></body></html>"""
 
 
 def settings_page(secret):
@@ -805,21 +805,23 @@ header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-item
 nav{display:flex;gap:12px;align-items:center}a{color:var(--green);font-weight:800;text-decoration:none}
 .hero{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:14px 16px;margin-bottom:12px;font-size:18px;font-weight:900}
 .hero.ok{border-color:#a7d8bd;color:var(--ok)}.hero.warn{border-color:#e5c17c;color:var(--warn)}.hero.bad{border-color:#e2aaa6;color:var(--bad)}
+.actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px}.actions button{height:42px;border:0;border-radius:8px;background:var(--green);color:#fff;font:15px inherit;font-weight:850}.actions button:nth-child(2),.actions button:nth-child(4){background:#5f6f6b}.toast{min-height:22px;margin:0 0 10px;color:var(--muted);font-size:14px}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card,.panel{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:12px}
 .card strong{display:block;color:var(--muted);font-size:13px;margin-bottom:6px}.card span{display:block;font-size:17px;font-weight:850;overflow-wrap:anywhere}.card small{display:block;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}
 .okText{color:var(--ok)}.warnText{color:var(--warn)}.badText{color:var(--bad)}
-.panel{margin-top:12px}pre{margin:0;white-space:pre-wrap;word-break:break-word;color:#25302e;font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-@media(max-width:620px){header{grid-template-columns:1fr}.grid{grid-template-columns:1fr}nav{justify-content:flex-start}.hero{font-size:17px}}
+.panel{margin-top:12px}.events{display:grid;gap:8px}.event{border-top:1px solid var(--line);padding-top:8px}.event:first-child{border-top:0;padding-top:0}.event strong{display:block;font-size:15px}.event p{margin:4px 0;color:#26302e;white-space:pre-wrap;overflow-wrap:anywhere}.event small{color:var(--muted)}pre{margin:0;white-space:pre-wrap;word-break:break-word;color:#25302e;font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+@media(max-width:620px){header{grid-template-columns:1fr}.grid,.actions{grid-template-columns:1fr 1fr}nav{justify-content:flex-start}.hero{font-size:17px}}
 """
 
 
 ADMIN_JS = r"""
-const overall=document.getElementById("overall"),cardsEl=document.getElementById("cards"),macEl=document.getElementById("mac");
+const overall=document.getElementById("overall"),cardsEl=document.getElementById("cards"),macEl=document.getElementById("mac"),eventsEl=document.getElementById("events"),toastEl=document.getElementById("toast");
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function fmt(ts){if(!ts)return "-";const d=new Date(ts);return String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0")}
 function age(ts,now){if(!ts)return "-";const sec=Math.max(0,Math.round((now-ts)/1000));if(sec<60)return sec+" 秒前";const min=Math.round(sec/60);if(min<60)return min+" 分钟前";return Math.round(min/60)+" 小时前"}
 function card(k,v,sub,cls=""){return '<article class="card"><strong>'+esc(k)+'</strong><span class="'+cls+'">'+esc(v)+'</span>'+(sub?'<small>'+esc(sub)+'</small>':'')+'</article>'}
-async function load(){const r=await fetch("/api/status?secret="+encodeURIComponent(secret),{cache:"no-store"});const s=await r.json();const m=s.macStatus||{};const ok=s.macOnline&&s.macStatusFresh&&!m.last_error;overall.className="hero "+(ok?"ok":(s.macOnline?"warn":"bad"));overall.textContent=ok?"运行正常":(s.macOnline?"Mac 在线，但存在需要关注的状态":"Mac relay 可能离线或轮询中断");const rows=[
+function eventRow(i){return '<article class="event"><strong>'+esc(i.contact||"系统")+' · '+esc(i.status||"")+'</strong><p>'+esc(i.text||"")+'</p><small>'+esc(fmt(i.createdAt))+' · '+esc(i.direction||"")+' · '+esc(i.source||"")+'</small></article>'}
+async function load(){const [statusRes,chatRes]=await Promise.all([fetch("/api/status?secret="+encodeURIComponent(secret),{cache:"no-store"}),fetch("/api/chat?secret="+encodeURIComponent(secret),{cache:"no-store"})]);const s=await statusRes.json();const c=await chatRes.json();const m=s.macStatus||{};const ok=s.macOnline&&s.macStatusFresh&&!m.last_error;overall.className="hero "+(ok?"ok":(s.macOnline?"warn":"bad"));overall.textContent=ok?"运行正常":(s.macOnline?"Mac 在线，但存在需要关注的状态":"Mac relay 可能离线或轮询中断");const rows=[
 ["中继服务","运行中",fmt(s.time),"okText"],
 ["Mac 轮询",s.macOnline?"在线":"异常",age(s.macLastPollAt,s.time),s.macOnline?"okText":"badText"],
 ["Mac 状态回传",s.macStatusFresh?"新鲜":"过期",age(s.macStatusAt,s.time),s.macStatusFresh?"okText":"warnText"],
@@ -828,7 +830,9 @@ async function load(){const r=await fetch("/api/status?secret="+encodeURICompone
 ["联系人数量",String(s.contactCount),"聊天面板可见联系人",""],
 ["语音转文字",m.voice_transcribe_enabled===false?"关闭":"开启",m.voice_worker_last_result||"-",m.voice_transcribe_enabled===false?"warnText":"okText"],
 ["最近错误",m.last_error||"-",m.last_voice_debug||"",m.last_error?"badText":"okText"]
-];cardsEl.innerHTML=rows.map(x=>card(...x)).join("");macEl.textContent=JSON.stringify(m,null,2)}
+];cardsEl.innerHTML=rows.map(x=>card(...x)).join("");eventsEl.innerHTML=(c.history||[]).slice(0,12).map(eventRow).join("")||'<p class="toast">暂无记录</p>';macEl.textContent=JSON.stringify(m,null,2)}
+async function sendControl(action){toastEl.textContent="正在发送指令";const r=await fetch("/control",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({secret,action})});const data=await r.json().catch(()=>({ok:false,error:"控制接口返回异常"}));toastEl.textContent=data.ok?"已提交，等待 Mac relay 执行":(data.error||"提交失败");await load()}
+document.querySelectorAll("[data-action]").forEach(button=>button.onclick=()=>sendControl(button.dataset.action));
 load();setInterval(load,5000);
 """
 

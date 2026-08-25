@@ -234,11 +234,62 @@ class RelayStore:
             for row in rows
         ]
 
+    def queue_items(self, limit=120):
+        with self.connect() as db:
+            rows = db.execute(
+                """
+                select id, token, contact, text, source, action, value, direction, status, created_at
+                from queue order by created_at asc limit ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "id": row[0],
+                "token": row[1],
+                "contact": row[2],
+                "text": row[3],
+                "source": row[4],
+                "action": row[5],
+                "value": parse_value(row[6]),
+                "direction": row[7],
+                "status": row[8],
+                "createdAt": row[9],
+            }
+            for row in rows
+        ]
+
     def history(self, limit=120):
         with self.connect() as db:
             rows = db.execute(
                 "select id, contact, text, source, direction, status, created_at from history order by created_at desc limit ?",
                 (limit,),
+            ).fetchall()
+        return [
+            {
+                "id": row[0],
+                "contact": row[1],
+                "text": row[2],
+                "source": row[3],
+                "direction": row[4],
+                "status": row[5],
+                "createdAt": row[6],
+            }
+            for row in rows
+        ]
+
+    def error_history(self, limit=80):
+        patterns = ("%fail%", "%error%", "%retry%", "%失败%", "%重试%", "%拦截%", "%manual-review%", "%未自动%")
+        clauses = " or ".join(["lower(status) like ?"] * len(patterns))
+        with self.connect() as db:
+            rows = db.execute(
+                f"""
+                select id, contact, text, source, direction, status, created_at
+                from history
+                where {clauses}
+                order by created_at desc limit ?
+                """,
+                tuple(patterns) + (limit,),
             ).fetchall()
         return [
             {
@@ -515,6 +566,16 @@ class RelayHandler(BaseHTTPRequestHandler):
                 self.json({"history": []}, 403)
             else:
                 self.json({"history": self.server.store.history()})
+        elif path == "/api/queue":
+            if not self.allowed(query.get("secret", [""])[0]):
+                self.json({"queue": []}, 403)
+            else:
+                self.json({"queue": self.server.store.queue_items()})
+        elif path == "/api/errors":
+            if not self.allowed(query.get("secret", [""])[0]):
+                self.json({"errors": []}, 403)
+            else:
+                self.json({"errors": self.server.store.error_history()})
         elif path == "/api/contacts":
             if not self.allowed(query.get("secret", [""])[0]):
                 self.json({"contacts": []}, 403)
@@ -836,7 +897,7 @@ def control_page(secret):
 
 
 def admin_page(secret):
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Admin</title><style>{ADMIN_CSS}</style></head><body><main><header><h1>BarkBridge 管理</h1><nav><a href="/chat?secret={esc(secret)}">聊天</a><a href="/control?secret={esc(secret)}">控制</a><a href="/settings?secret={esc(secret)}">设置</a></nav></header><section class="hero" id="overall">正在读取状态</section><section class="actions"><button data-action="resume">恢复</button><button data-action="pause">暂停</button><button data-action="auto_send_on">自动发送开</button><button data-action="auto_send_off">自动发送关</button></section><p class="toast" id="toast"></p><section class="grid" id="cards"></section><section class="panel"><h2>最近记录</h2><div class="events" id="events"></div></section><section class="panel"><h2>Mac relay 详情</h2><pre id="mac"></pre></section></main><script>const secret={json.dumps(secret)};{ADMIN_JS}</script></body></html>"""
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Admin</title><style>{ADMIN_CSS}</style></head><body><main><header><h1>BarkBridge 管理</h1><nav><a href="/chat?secret={esc(secret)}">聊天</a><a href="/control?secret={esc(secret)}">控制</a><a href="/settings?secret={esc(secret)}">设置</a></nav></header><section class="hero" id="overall">正在读取状态</section><section class="actions"><button data-action="resume">恢复</button><button data-action="pause">暂停</button><button data-action="auto_send_on">自动发送开</button><button data-action="auto_send_off">自动发送关</button></section><p class="toast" id="toast"></p><section class="grid" id="cards"></section><section class="panel"><h2>待处理队列</h2><div class="events" id="queue"></div></section><section class="panel"><h2>异常记录</h2><div class="events" id="errors"></div></section><section class="panel"><h2>最近记录</h2><div class="events" id="events"></div></section><section class="panel"><h2>Mac relay 详情</h2><pre id="mac"></pre></section></main><script>const secret={json.dumps(secret)};{ADMIN_JS}</script></body></html>"""
 
 
 def settings_page(secret):
@@ -914,13 +975,14 @@ nav{display:flex;gap:12px;align-items:center}a{color:var(--green);font-weight:80
 
 
 ADMIN_JS = r"""
-const overall=document.getElementById("overall"),cardsEl=document.getElementById("cards"),macEl=document.getElementById("mac"),eventsEl=document.getElementById("events"),toastEl=document.getElementById("toast");
+const overall=document.getElementById("overall"),cardsEl=document.getElementById("cards"),macEl=document.getElementById("mac"),eventsEl=document.getElementById("events"),queueEl=document.getElementById("queue"),errorsEl=document.getElementById("errors"),toastEl=document.getElementById("toast");
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function fmt(ts){if(!ts)return "-";const d=new Date(ts);return String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0")}
 function age(ts,now){if(!ts)return "-";const sec=Math.max(0,Math.round((now-ts)/1000));if(sec<60)return sec+" 秒前";const min=Math.round(sec/60);if(min<60)return min+" 分钟前";return Math.round(min/60)+" 小时前"}
 function card(k,v,sub,cls=""){return '<article class="card"><strong>'+esc(k)+'</strong><span class="'+cls+'">'+esc(v)+'</span>'+(sub?'<small>'+esc(sub)+'</small>':'')+'</article>'}
 function eventRow(i){return '<article class="event"><strong>'+esc(i.contact||"系统")+' · '+esc(i.status||"")+'</strong><p>'+esc(i.text||"")+'</p><small>'+esc(fmt(i.createdAt))+' · '+esc(i.direction||"")+' · '+esc(i.source||"")+'</small></article>'}
-async function load(){const [statusRes,chatRes]=await Promise.all([fetch("/api/status?secret="+encodeURIComponent(secret),{cache:"no-store"}),fetch("/api/chat?secret="+encodeURIComponent(secret),{cache:"no-store"})]);const s=await statusRes.json();const c=await chatRes.json();const m=s.macStatus||{};const ok=s.macOnline&&s.macStatusFresh&&!m.last_error;overall.className="hero "+(ok?"ok":(s.macOnline?"warn":"bad"));overall.textContent=ok?"运行正常":(s.macOnline?"Mac 在线，但存在需要关注的状态":"Mac relay 可能离线或轮询中断");const rows=[
+function queueRow(i){return '<article class="event"><strong>'+esc(i.contact||"系统")+' · '+esc(i.action||i.source||"任务")+'</strong><p>'+esc(i.text||"")+'</p><small>'+esc(fmt(i.createdAt))+' · '+esc(i.status||"")+' · '+esc(i.id||"")+'</small></article>'}
+async function load(){const [statusRes,chatRes,queueRes,errorRes]=await Promise.all([fetch("/api/status?secret="+encodeURIComponent(secret),{cache:"no-store"}),fetch("/api/chat?secret="+encodeURIComponent(secret),{cache:"no-store"}),fetch("/api/queue?secret="+encodeURIComponent(secret),{cache:"no-store"}),fetch("/api/errors?secret="+encodeURIComponent(secret),{cache:"no-store"})]);const s=await statusRes.json();const c=await chatRes.json();const q=await queueRes.json();const e=await errorRes.json();const m=s.macStatus||{};const ok=s.macOnline&&s.macStatusFresh&&!m.last_error&&s.queueCount===0;overall.className="hero "+(ok?"ok":(s.macOnline?"warn":"bad"));overall.textContent=ok?"运行正常":(s.macOnline?"Mac 在线，但存在需要关注的状态":"Mac relay 可能离线或轮询中断");const rows=[
 ["中继服务","运行中",fmt(s.time),"okText"],
 ["Mac 轮询",s.macOnline?"在线":"异常",age(s.macLastPollAt,s.time),s.macOnline?"okText":"badText"],
 ["Mac 状态回传",s.macStatusFresh?"新鲜":"过期",age(s.macStatusAt,s.time),s.macStatusFresh?"okText":"warnText"],
@@ -929,7 +991,7 @@ async function load(){const [statusRes,chatRes]=await Promise.all([fetch("/api/s
 ["联系人数量",String(s.contactCount),"聊天面板可见联系人",""],
 ["语音转文字",m.voice_transcribe_enabled===false?"关闭":"开启",m.voice_worker_last_result||"-",m.voice_transcribe_enabled===false?"warnText":"okText"],
 ["最近错误",m.last_error||"-",m.last_voice_debug||"",m.last_error?"badText":"okText"]
-];cardsEl.innerHTML=rows.map(x=>card(...x)).join("");eventsEl.innerHTML=(c.history||[]).slice(0,12).map(eventRow).join("")||'<p class="toast">暂无记录</p>';macEl.textContent=JSON.stringify(m,null,2)}
+];cardsEl.innerHTML=rows.map(x=>card(...x)).join("");queueEl.innerHTML=(q.queue||[]).slice(0,30).map(queueRow).join("")||'<p class="toast">当前没有待处理任务</p>';errorsEl.innerHTML=(e.errors||[]).slice(0,30).map(eventRow).join("")||'<p class="toast">当前没有异常记录</p>';eventsEl.innerHTML=(c.history||[]).slice(0,12).map(eventRow).join("")||'<p class="toast">暂无记录</p>';macEl.textContent=JSON.stringify(m,null,2)}
 async function sendControl(action){toastEl.textContent="正在发送指令";const r=await fetch("/control",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({secret,action})});const data=await r.json().catch(()=>({ok:false,error:"控制接口返回异常"}));toastEl.textContent=data.ok?"已提交，等待 Mac relay 执行":(data.error||"提交失败");await load()}
 document.querySelectorAll("[data-action]").forEach(button=>button.onclick=()=>sendControl(button.dataset.action));
 load();setInterval(load,5000);

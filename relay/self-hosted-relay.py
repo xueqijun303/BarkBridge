@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 import argparse
 import cgi
 import html
@@ -52,6 +53,7 @@ DEFAULT_CONFIG = {
 HISTORY_RETAIN_PER_CONTACT = 100
 HISTORY_RETAIN_TOTAL = 5000
 VOICE_TASK_DEDUPE_MS = 1200
+TASK_RETAIN_TOTAL = 3000
 
 
 def is_hidden_contact(contact):
@@ -118,6 +120,24 @@ class RelayStore:
             )
             db.execute(
                 """
+                create table if not exists tasks (
+                    id text primary key,
+                    token text not null default '',
+                    contact text not null default '',
+                    text text not null default '',
+                    source text not null default '',
+                    action text not null default '',
+                    direction text not null default '',
+                    status text not null default '',
+                    detail text not null default '',
+                    attempts integer not null default 0,
+                    created_at integer not null,
+                    updated_at integer not null
+                )
+                """
+            )
+            db.execute(
+                """
                 create table if not exists config (
                     key text primary key,
                     value text not null default ''
@@ -163,14 +183,17 @@ class RelayStore:
         with self.lock:
             waiter = self.waiters.pop(0) if self.waiters else None
             if waiter:
+                self.record_task(item, "queued", "waiting Mac relay")
                 waiter.put(item)
                 return
             with self.connect() as db:
                 self.insert_queue_item(db, item)
+                self.insert_task_item(db, item, "queued", "waiting Mac relay")
 
     def enqueue_voice_task(self, item):
         with self.lock, self.connect() as db:
             self.insert_queue_item(db, item)
+            self.insert_task_item(db, item, "queued", "waiting voice transcription")
 
     def insert_queue_item(self, db, item):
         db.execute(
@@ -186,12 +209,110 @@ class RelayStore:
                 item.get("text", ""),
                 item.get("source", ""),
                 item.get("action", ""),
-                str(item.get("value", "")),
+                dump_value(item.get("value", "")),
                 item.get("direction", ""),
                 item.get("status", ""),
                 int(item.get("createdAt") or now_ms()),
             ),
         )
+
+    def insert_task_item(self, db, item, status=None, detail=""):
+        created_at = int(item.get("createdAt") or now_ms())
+        db.execute(
+            """
+            insert or replace into tasks
+            (id, token, contact, text, source, action, direction, status, detail, attempts, created_at, updated_at)
+            values (
+              ?,
+              coalesce((select token from tasks where id = ?), ?),
+              ?,
+              ?,
+              ?,
+              ?,
+              ?,
+              ?,
+              ?,
+              ?,
+              coalesce((select created_at from tasks where id = ?), ?),
+              ?
+            )
+            """,
+            (
+                item["id"],
+                item["id"],
+                item.get("token", ""),
+                item.get("contact", ""),
+                item.get("text", ""),
+                item.get("source", ""),
+                item.get("action", ""),
+                item.get("direction", ""),
+                status or item.get("status", ""),
+                detail,
+                int(item.get("attempts") or 0),
+                item["id"],
+                created_at,
+                now_ms(),
+            ),
+        )
+        rows = db.execute("select id from tasks order by updated_at desc limit -1 offset ?", (TASK_RETAIN_TOTAL,)).fetchall()
+        if rows:
+            db.executemany("delete from tasks where id = ?", rows)
+
+    def record_task(self, item, status, detail="", attempts=None):
+        item = dict(item or {})
+        if not item.get("id"):
+            return
+        if attempts is not None:
+            item["attempts"] = attempts
+        with self.lock, self.connect() as db:
+            self.insert_task_item(db, item, status, detail)
+
+    def update_task_status(self, data):
+        task_id = str(data.get("id", "")).strip()
+        if not task_id:
+            raise ValueError("任务 id 不能为空")
+        now = now_ms()
+        item = {
+            "id": task_id,
+            "token": data.get("token", ""),
+            "contact": str(data.get("contact", "")),
+            "text": str(data.get("text", "")),
+            "source": str(data.get("source", "")),
+            "action": str(data.get("action", "")),
+            "direction": str(data.get("direction", "")),
+            "status": str(data.get("status", "")),
+            "attempts": int(data.get("attempts") or 0),
+            "createdAt": int(data.get("createdAt") or now),
+        }
+        detail = str(data.get("detail", ""))
+        requeue = data.get("requeue") is True or str(data.get("requeue", "")).lower() in {"1", "true", "yes", "on"}
+        with self.lock, self.connect() as db:
+            row = db.execute("select token, contact, text, source, action, direction, created_at from tasks where id = ?", (task_id,)).fetchone()
+            if row:
+                item["token"] = item["token"] or row[0]
+                item["contact"] = item["contact"] or row[1]
+                item["text"] = item["text"] or row[2]
+                item["source"] = item["source"] or row[3]
+                item["action"] = item["action"] or row[4]
+                item["direction"] = item["direction"] or row[5]
+                item["createdAt"] = int(row[6] or item["createdAt"])
+            self.insert_task_item(db, item, item["status"], detail)
+            history_status = item["status"] if not detail else f"{item['status']}: {detail}"
+            db.execute("update history set status = ? where id = ?", (history_status[:500], task_id))
+            if requeue:
+                queued = dict(item)
+                queued["status"] = "queued"
+                queued["value"] = {"attempts": item["attempts"], "last_error": detail}
+                self.insert_queue_item(db, queued)
+        if requeue:
+            self.notify_waiters(item)
+        return item
+
+    def notify_waiters(self, item):
+        with self.lock:
+            waiter = self.waiters.pop(0) if self.waiters else None
+        if waiter:
+            waiter.put(item)
 
     def dequeue(self, wait_ms):
         with self.lock:
@@ -202,6 +323,7 @@ class RelayStore:
             self.waiters.append(waiter)
         try:
             item = waiter.get(timeout=wait_ms / 1000)
+            self.record_task(item, "claimed", "Mac relay claimed task")
             return [item]
         except queue.Empty:
             with self.lock:
@@ -215,24 +337,33 @@ class RelayStore:
     def pop_queue_locked(self):
         with self.connect() as db:
             rows = db.execute(
-                "select id, token, contact, text, source, action, value, created_at from queue order by created_at asc limit 200"
+                "select id, token, contact, text, source, action, value, direction, status, created_at from queue order by created_at asc limit 200"
             ).fetchall()
             if not rows:
                 return []
+            items = [
+                {
+                    "id": row[0],
+                    "token": row[1],
+                    "contact": row[2],
+                    "text": row[3],
+                    "source": row[4],
+                    "action": row[5],
+                    "value": parse_value(row[6]),
+                    "direction": row[7],
+                    "status": row[8],
+                    "createdAt": row[9],
+                }
+                for row in rows
+            ]
+            for item in items:
+                value = item.get("value")
+                if isinstance(value, dict):
+                    item["attempts"] = int(value.get("attempts") or 0)
+                    item["last_error"] = str(value.get("last_error") or "")
+                self.insert_task_item(db, item, "claimed", "Mac relay claimed task")
             db.executemany("delete from queue where id = ?", [(row[0],) for row in rows])
-        return [
-            {
-                "id": row[0],
-                "token": row[1],
-                "contact": row[2],
-                "text": row[3],
-                "source": row[4],
-                "action": row[5],
-                "value": parse_value(row[6]),
-                "createdAt": row[7],
-            }
-            for row in rows
-        ]
+        return items
 
     def queue_items(self, limit=120):
         with self.connect() as db:
@@ -255,6 +386,33 @@ class RelayStore:
                 "direction": row[7],
                 "status": row[8],
                 "createdAt": row[9],
+            }
+            for row in rows
+        ]
+
+    def task_items(self, limit=160):
+        with self.connect() as db:
+            rows = db.execute(
+                """
+                select id, token, contact, text, source, action, direction, status, detail, attempts, created_at, updated_at
+                from tasks order by updated_at desc limit ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "id": row[0],
+                "token": row[1],
+                "contact": row[2],
+                "text": row[3],
+                "source": row[4],
+                "action": row[5],
+                "direction": row[6],
+                "status": row[7],
+                "detail": row[8],
+                "attempts": row[9],
+                "createdAt": row[10],
+                "updatedAt": row[11],
             }
             for row in rows
         ]
@@ -314,6 +472,11 @@ class RelayStore:
             row = db.execute("select count(*) from queue").fetchone()
         return int(row[0] if row else 0)
 
+    def task_counts(self):
+        with self.connect() as db:
+            rows = db.execute("select status, count(*) from tasks group by status").fetchall()
+        return {str(row[0] or "unknown"): int(row[1]) for row in rows}
+
     def latest_history_time(self, source=None):
         sql = "select max(created_at) from history"
         args = ()
@@ -364,6 +527,7 @@ class RelayStore:
             "ok": True,
             "time": current_time,
             "queueCount": self.queue_count(),
+            "taskCounts": self.task_counts(),
             "contactCount": len(self.contacts()),
             "historyLimitPerContact": HISTORY_RETAIN_PER_CONTACT,
             "historyLimitTotal": HISTORY_RETAIN_TOTAL,
@@ -473,11 +637,23 @@ class RelayStore:
 
 
 def parse_value(value):
+    text = str(value or "")
+    if text.startswith("{") or text.startswith("["):
+        try:
+            return json.loads(text)
+        except Exception:
+            return value
     if value == "True":
         return True
     if value == "False":
         return False
     return value
+
+
+def dump_value(value):
+    if isinstance(value, (dict, list, bool, int, float)) or value is None:
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
 
 
 def now_ms():
@@ -571,6 +747,11 @@ class RelayHandler(BaseHTTPRequestHandler):
                 self.json({"queue": []}, 403)
             else:
                 self.json({"queue": self.server.store.queue_items()})
+        elif path == "/api/tasks":
+            if not self.allowed(query.get("secret", [""])[0]):
+                self.json({"tasks": []}, 403)
+            else:
+                self.json({"tasks": self.server.store.task_items()})
         elif path == "/api/errors":
             if not self.allowed(query.get("secret", [""])[0]):
                 self.json({"errors": []}, 403)
@@ -622,6 +803,8 @@ class RelayHandler(BaseHTTPRequestHandler):
             self.pin_contact()
         elif path == "/api/mac/status":
             self.save_mac_status()
+        elif path == "/api/task/status":
+            self.save_task_status()
         elif path == "/api/chat/clear":
             self.clear_contact_history()
         else:
@@ -806,6 +989,19 @@ class RelayHandler(BaseHTTPRequestHandler):
         self.server.store.set_meta("macStatusAt", now_ms())
         self.json({"ok": True})
 
+    def save_task_status(self):
+        data = self.read_json()
+        secret = str(data.get("secret", "")).strip() or self.query().get("secret", [""])[0]
+        if not self.allowed(secret):
+            self.json({"ok": False, "error": "密钥不正确"}, 403)
+            return
+        try:
+            item = self.server.store.update_task_status(data)
+        except ValueError as exc:
+            self.json({"ok": False, "error": str(exc)}, 400)
+            return
+        self.json({"ok": True, "task": item})
+
     def enqueue(self, contact, text, source, token):
         item = {
             "id": make_id(),
@@ -897,7 +1093,7 @@ def control_page(secret):
 
 
 def admin_page(secret):
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Admin</title><style>{ADMIN_CSS}</style></head><body><main><header><h1>BarkBridge 管理</h1><details class="page-menu"><summary>菜单</summary><div class="menu-panel"><a href="/chat?secret={esc(secret)}">聊天</a><a href="/control?secret={esc(secret)}">控制</a><a href="/settings?secret={esc(secret)}">设置</a></div></details></header><section class="hero" id="overall">正在读取状态</section><section class="actions"><details class="action-menu"><summary>控制 Mac relay</summary><div class="menu-panel action-panel"><button data-action="resume">恢复轮询</button><button data-action="pause">暂停轮询</button><button data-action="auto_send_on">开启自动发送</button><button data-action="auto_send_off">关闭自动发送</button></div></details></section><p class="toast" id="toast"></p><section class="grid" id="cards"></section><section class="panel"><h2>待处理队列</h2><div class="events" id="queue"></div></section><section class="panel"><h2>异常记录</h2><div class="events" id="errors"></div></section><section class="panel"><h2>最近记录</h2><div class="events" id="events"></div></section><section class="panel"><h2>Mac relay 详情</h2><pre id="mac"></pre></section></main><script>const secret={json.dumps(secret)};{ADMIN_JS}</script></body></html>"""
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><title>BarkBridge Admin</title><style>{ADMIN_CSS}</style></head><body><main><header><h1>BarkBridge 管理</h1><details class="page-menu"><summary>菜单</summary><div class="menu-panel"><a href="/chat?secret={esc(secret)}">聊天</a><a href="/control?secret={esc(secret)}">控制</a><a href="/settings?secret={esc(secret)}">设置</a></div></details></header><section class="hero" id="overall">正在读取状态</section><section class="actions"><details class="action-menu"><summary>控制 Mac relay</summary><div class="menu-panel action-panel"><button data-action="resume">恢复轮询</button><button data-action="pause">暂停轮询</button><button data-action="auto_send_on">开启自动发送</button><button data-action="auto_send_off">关闭自动发送</button></div></details></section><p class="toast" id="toast"></p><section class="grid" id="cards"></section><section class="panel"><h2>任务状态</h2><div class="events" id="tasks"></div></section><section class="panel"><h2>待处理队列</h2><div class="events" id="queue"></div></section><section class="panel"><h2>异常记录</h2><div class="events" id="errors"></div></section><section class="panel"><h2>最近记录</h2><div class="events" id="events"></div></section><section class="panel"><h2>Mac relay 详情</h2><pre id="mac"></pre></section></main><script>const secret={json.dumps(secret)};{ADMIN_JS}</script></body></html>"""
 
 
 def settings_page(secret):
@@ -977,23 +1173,25 @@ a{color:var(--green);font-weight:800;text-decoration:none}
 
 
 ADMIN_JS = r"""
-const overall=document.getElementById("overall"),cardsEl=document.getElementById("cards"),macEl=document.getElementById("mac"),eventsEl=document.getElementById("events"),queueEl=document.getElementById("queue"),errorsEl=document.getElementById("errors"),toastEl=document.getElementById("toast");
+const overall=document.getElementById("overall"),cardsEl=document.getElementById("cards"),macEl=document.getElementById("mac"),eventsEl=document.getElementById("events"),queueEl=document.getElementById("queue"),tasksEl=document.getElementById("tasks"),errorsEl=document.getElementById("errors"),toastEl=document.getElementById("toast");
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function fmt(ts){if(!ts)return "-";const d=new Date(ts);return String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0")}
 function age(ts,now){if(!ts)return "-";const sec=Math.max(0,Math.round((now-ts)/1000));if(sec<60)return sec+" 秒前";const min=Math.round(sec/60);if(min<60)return min+" 分钟前";return Math.round(min/60)+" 小时前"}
 function card(k,v,sub,cls=""){return '<article class="card"><strong>'+esc(k)+'</strong><span class="'+cls+'">'+esc(v)+'</span>'+(sub?'<small>'+esc(sub)+'</small>':'')+'</article>'}
 function eventRow(i){return '<article class="event"><strong>'+esc(i.contact||"系统")+' · '+esc(i.status||"")+'</strong><p>'+esc(i.text||"")+'</p><small>'+esc(fmt(i.createdAt))+' · '+esc(i.direction||"")+' · '+esc(i.source||"")+'</small></article>'}
 function queueRow(i){return '<article class="event"><strong>'+esc(i.contact||"系统")+' · '+esc(i.action||i.source||"任务")+'</strong><p>'+esc(i.text||"")+'</p><small>'+esc(fmt(i.createdAt))+' · '+esc(i.status||"")+' · '+esc(i.id||"")+'</small></article>'}
-async function load(){const [statusRes,chatRes,queueRes,errorRes]=await Promise.all([fetch("/api/status?secret="+encodeURIComponent(secret),{cache:"no-store"}),fetch("/api/chat?secret="+encodeURIComponent(secret),{cache:"no-store"}),fetch("/api/queue?secret="+encodeURIComponent(secret),{cache:"no-store"}),fetch("/api/errors?secret="+encodeURIComponent(secret),{cache:"no-store"})]);const s=await statusRes.json();const c=await chatRes.json();const q=await queueRes.json();const e=await errorRes.json();const m=s.macStatus||{};const ok=s.macOnline&&s.macStatusFresh&&!m.last_error&&s.queueCount===0;overall.className="hero "+(ok?"ok":(s.macOnline?"warn":"bad"));overall.textContent=ok?"运行正常":(s.macOnline?"Mac 在线，但存在需要关注的状态":"Mac relay 可能离线或轮询中断");const rows=[
+function taskRow(i){const detail=i.detail?'<p>'+esc(i.detail)+'</p>':('<p>'+esc(i.text||"")+'</p>');return '<article class="event"><strong>'+esc(i.contact||"系统")+' · '+esc(i.status||"")+'</strong>'+detail+'<small>'+esc(fmt(i.updatedAt))+' · '+esc(i.action||i.source||"任务")+' · 重试 '+esc(i.attempts||0)+'</small></article>'}
+async function load(){const [statusRes,chatRes,queueRes,taskRes,errorRes]=await Promise.all([fetch("/api/status?secret="+encodeURIComponent(secret),{cache:"no-store"}),fetch("/api/chat?secret="+encodeURIComponent(secret),{cache:"no-store"}),fetch("/api/queue?secret="+encodeURIComponent(secret),{cache:"no-store"}),fetch("/api/tasks?secret="+encodeURIComponent(secret),{cache:"no-store"}),fetch("/api/errors?secret="+encodeURIComponent(secret),{cache:"no-store"})]);const s=await statusRes.json();const c=await chatRes.json();const q=await queueRes.json();const t=await taskRes.json();const e=await errorRes.json();const m=s.macStatus||{};const taskCounts=s.taskCounts||{};const activeTasks=(taskCounts.queued||0)+(taskCounts.claimed||0)+(taskCounts.processing||0)+(taskCounts.retry||0);const ok=s.macOnline&&s.macStatusFresh&&!m.last_error&&s.queueCount===0&&activeTasks===0;overall.className="hero "+(ok?"ok":(s.macOnline?"warn":"bad"));overall.textContent=ok?"运行正常":(s.macOnline?"Mac 在线，但存在需要关注的状态":"Mac relay 可能离线或轮询中断");const rows=[
 ["中继服务","运行中",fmt(s.time),"okText"],
 ["Mac 轮询",s.macOnline?"在线":"异常",age(s.macLastPollAt,s.time),s.macOnline?"okText":"badText"],
 ["Mac 状态回传",s.macStatusFresh?"新鲜":"过期",age(s.macStatusAt,s.time),s.macStatusFresh?"okText":"warnText"],
 ["Android 上传",s.androidLastUploadAt?age(s.androidLastUploadAt,s.time):"-",fmt(s.androidLastUploadAt),s.androidLastUploadAt?"okText":"warnText"],
 ["待处理队列",String(s.queueCount),s.queueCount>0?"等待 Mac 轮询":"无积压",s.queueCount>0?"warnText":"okText"],
+["活跃任务",String(activeTasks),JSON.stringify(taskCounts),activeTasks>0?"warnText":"okText"],
 ["联系人数量",String(s.contactCount),"聊天面板可见联系人",""],
 ["语音转文字",m.voice_transcribe_enabled===false?"关闭":"开启",m.voice_worker_last_result||"-",m.voice_transcribe_enabled===false?"warnText":"okText"],
 ["最近错误",m.last_error||"-",m.last_voice_debug||"",m.last_error?"badText":"okText"]
-];cardsEl.innerHTML=rows.map(x=>card(...x)).join("");queueEl.innerHTML=(q.queue||[]).slice(0,30).map(queueRow).join("")||'<p class="toast">当前没有待处理任务</p>';errorsEl.innerHTML=(e.errors||[]).slice(0,30).map(eventRow).join("")||'<p class="toast">当前没有异常记录</p>';eventsEl.innerHTML=(c.history||[]).slice(0,12).map(eventRow).join("")||'<p class="toast">暂无记录</p>';macEl.textContent=JSON.stringify(m,null,2)}
+];cardsEl.innerHTML=rows.map(x=>card(...x)).join("");tasksEl.innerHTML=(t.tasks||[]).slice(0,30).map(taskRow).join("")||'<p class="toast">暂无任务状态</p>';queueEl.innerHTML=(q.queue||[]).slice(0,30).map(queueRow).join("")||'<p class="toast">当前没有待处理任务</p>';errorsEl.innerHTML=(e.errors||[]).slice(0,30).map(eventRow).join("")||'<p class="toast">当前没有异常记录</p>';eventsEl.innerHTML=(c.history||[]).slice(0,12).map(eventRow).join("")||'<p class="toast">暂无记录</p>';macEl.textContent=JSON.stringify(m,null,2)}
 function closeMenus(){document.querySelectorAll("details[open]").forEach(d=>d.open=false)}
 async function sendControl(action){closeMenus();toastEl.textContent="正在发送指令";const r=await fetch("/control",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({secret,action})});const data=await r.json().catch(()=>({ok:false,error:"控制接口返回异常"}));toastEl.textContent=data.ok?"已提交，等待 Mac relay 执行":(data.error||"提交失败");await load()}
 document.querySelectorAll("[data-action]").forEach(button=>button.onclick=()=>sendControl(button.dataset.action));

@@ -30,6 +30,7 @@ POLL_ERROR_LOG_EVERY_SECONDS = 60
 FAILURE_PAUSE_THRESHOLD = 3
 CONTACT_FAILURES = {}
 STATUS_REPORT_URL = ""
+TASK_STATUS_URL = ""
 STATUS_REPORT_SECRET = ""
 STATUS_REPORT_LAST_AT = 0.0
 RELAY_STATUS = {
@@ -202,10 +203,11 @@ def start_web_console(args):
 
 
 def configure_status_reporting(args):
-    global STATUS_REPORT_URL, STATUS_REPORT_SECRET
+    global STATUS_REPORT_URL, TASK_STATUS_URL, STATUS_REPORT_SECRET
     STATUS_REPORT_SECRET = query_param(args.poll_url, "secret")
     ingest_url = args.ingest_url.strip() or ingest_url_from_poll(args.poll_url)
     STATUS_REPORT_URL = urllib.parse.urlunparse(urllib.parse.urlparse(ingest_url)._replace(path="/api/mac/status"))
+    TASK_STATUS_URL = urllib.parse.urlunparse(urllib.parse.urlparse(ingest_url)._replace(path="/api/task/status"))
     update_status(
         process_id=os.getpid(),
         voice_transcribe_enabled=voice_transcribe_enabled(args),
@@ -434,6 +436,37 @@ def maybe_report_status(changed):
             response.read()
     except Exception:
         pass
+
+
+def report_task_status(task, status, detail="", attempts=None, requeue=False):
+    if not TASK_STATUS_URL or not STATUS_REPORT_SECRET or not task or not task.get("id"):
+        return
+    payload = {
+        "secret": STATUS_REPORT_SECRET,
+        "id": task.get("id"),
+        "token": task.get("token", ""),
+        "contact": task.get("contact", ""),
+        "text": task.get("text", ""),
+        "source": task.get("source", ""),
+        "action": task.get("action", ""),
+        "direction": task.get("direction", ""),
+        "status": status,
+        "detail": detail,
+        "attempts": int(attempts if attempts is not None else task.get("attempts") or 0),
+        "createdAt": int(task.get("createdAt") or 0),
+        "requeue": bool(requeue),
+    }
+    try:
+        request = urllib.request.Request(
+            TASK_STATUS_URL,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json; charset=utf-8", "User-Agent": "BarkBridge-MacRelay/1.0"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=3) as response:
+            response.read()
+    except Exception as exc:
+        print(f"task-status warning: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
 
 
 def default_control():
@@ -901,22 +934,26 @@ def process_replies(replies, args):
     if not replies:
         return
     normalized_replies = [normalize_reply(reply) for reply in replies]
-    remaining = process_voice_batches([reply for reply in normalized_replies if reply["action"] == "voice_transcribe"], args)
+    remaining = process_voice_queue([reply for reply in normalized_replies if reply["action"] == "voice_transcribe"], args)
     for normalized in normalized_replies:
         if normalized["action"] == "voice_transcribe":
             continue
+        report_task_status(normalized, "processing", "Mac relay is processing task", normalized["attempts"])
         if normalized["source"] == "control" or normalized["action"]:
             handle_remote_control(normalized, args)
+            report_task_status(normalized, "done", "control command applied", normalized["attempts"])
             continue
         contact = normalized["contact"]
         text = normalized["text"]
         attempts = normalized["attempts"]
         if not contact or not text:
             print(f"skip invalid reply: {reply}", flush=True)
+            report_task_status(normalized, "failed", "invalid contact or text", attempts)
             continue
         print(f"picked: {contact}: {text[:40]}", flush=True)
         if args.dry_run:
             print(f"dry-run: {contact}: {text}", flush=True)
+            report_task_status(normalized, "dry-run", "dry run skipped WeChat operation", attempts)
             continue
         rule = resolve_contact_rule(contact)
         control = load_control()
@@ -924,24 +961,29 @@ def process_replies(replies, args):
             stage_manual_review(contact, text, rule["target"])
             reason = control_pause_reason(control)
             append_history(contact, text, f"manual-review: {reason}")
+            report_task_status(normalized, "manual-review", reason, attempts)
             print(f"manual-review: {contact} -> {rule['target']} ({reason})", flush=True)
             send_receipt(args.receipt_url, "BarkBridge 未自动发送", f"{reason}，已复制内容: {contact} -> {rule['target']}")
             continue
         if is_recently_processed(normalized["id"]):
             print(f"skip already processed: {contact} -> {rule['target']} ({normalized['id']})", flush=True)
+            report_task_status(normalized, "done", "already processed recently", attempts)
             continue
         if not rule["auto_send"]:
             stage_manual_review(contact, text, rule["target"])
             print(f"manual-review: {contact} -> {rule['target']} ({rule['reason']})", flush=True)
+            report_task_status(normalized, "manual-review", rule["reason"], attempts)
             send_receipt(args.receipt_url, "BarkBridge 未自动发送", f"{rule['reason']}，已复制内容，请在 Mac 微信手动确认: {contact} -> {rule['target']}")
             continue
         try:
+            report_task_status(normalized, "sending", f"opening {rule['target']}", attempts)
             with SEND_LOCK:
                 result = send_wechat(rule["target"], text, args.send_shortcut, rule)
             remember_processed(normalized["id"], rule["target"], text)
             CONTACT_FAILURES.pop(rule["target"], None)
             update_status(last_reply_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), last_send_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), last_success=f"{contact} -> {rule['target']}", last_identified_title=result["actual_title"], last_error="")
             append_history(contact, text, f"sent: {result['actual_title']}")
+            report_task_status(normalized, "sent", f"sent to {result['actual_title']}", attempts)
             print(f"sent-action: {contact} -> {rule['target']} ({result['actual_title']})", flush=True)
             send_receipt(args.receipt_url, "BarkBridge 已发送", format_receipt(contact, rule["target"], result["actual_title"], text))
         except Exception as exc:
@@ -953,8 +995,10 @@ def process_replies(replies, args):
             update_status(last_error=f"{contact}: {normalized['last_error']}")
             if normalized["attempts"] <= args.max_retries:
                 remaining.append(normalized)
+                report_task_status(normalized, "retry", normalized["last_error"], normalized["attempts"])
                 print(f"queued retry {normalized['attempts']}/{args.max_retries}: {contact}", file=sys.stderr, flush=True)
             else:
+                report_task_status(normalized, "failed", normalized["last_error"], normalized["attempts"])
                 print(f"drop after retries: {contact}: {normalized['last_error']}", file=sys.stderr, flush=True)
             send_receipt(
                 args.receipt_url,
@@ -965,6 +1009,9 @@ def process_replies(replies, args):
 
 
 def normalize_reply(reply):
+    value = reply.get("value")
+    value_attempts = value.get("attempts") if isinstance(value, dict) else 0
+    value_error = value.get("last_error") if isinstance(value, dict) else ""
     return {
         "id": str(reply.get("id") or f"local-{int(time.time() * 1000)}"),
         "token": str(reply.get("token") or ""),
@@ -972,10 +1019,11 @@ def normalize_reply(reply):
         "text": str(reply.get("text") or "").strip(),
         "source": str(reply.get("source") or "").strip(),
         "action": str(reply.get("action") or "").strip(),
-        "value": reply.get("value"),
+        "value": value,
         "createdAt": int(reply.get("createdAt") or 0),
-        "attempts": int(reply.get("attempts") or 0),
-        "last_error": str(reply.get("last_error") or ""),
+        "direction": str(reply.get("direction") or ""),
+        "attempts": int(reply.get("attempts") or value_attempts or 0),
+        "last_error": str(reply.get("last_error") or value_error or ""),
     }
 
 
@@ -993,26 +1041,31 @@ def handle_voice_transcribe(task, args):
     handle_voice_transcribe_batch(contact, [task], args)
 
 
-def process_voice_batches(tasks, args):
+def process_voice_queue(tasks, args):
     batches = {}
     for task in tasks:
         contact = task["contact"]
+        report_task_status(task, "processing", "voice task queued on Mac relay", task.get("attempts", 0))
         if not contact:
             print(f"skip invalid voice task: {task}", flush=True)
+            report_task_status(task, "failed", "invalid contact", task.get("attempts", 0))
             continue
         if is_expired_voice_task(task, args.voice_task_ttl_minutes):
             reason = f"voice-transcribe-expired: older than {args.voice_task_ttl_minutes} minutes"
             append_history(contact, task["text"], reason)
             remember_processed(task["id"], contact, reason)
+            report_task_status(task, "failed", reason, task.get("attempts", 0))
             print(f"drop expired voice task: {contact} ({task['id']})", file=sys.stderr, flush=True)
             continue
         if not voice_transcribe_enabled(args):
             print(f"voice-transcribe disabled: {contact}", flush=True)
             append_history(contact, task["text"], "voice-transcribe-disabled")
             remember_processed(task["id"], contact, "voice-transcribe-disabled")
+            report_task_status(task, "disabled", "voice transcription disabled", task.get("attempts", 0))
             continue
         if is_recently_processed(task["id"]):
             print(f"skip already processed voice task: {contact} ({task['id']})", flush=True)
+            report_task_status(task, "done", "already processed recently", task.get("attempts", 0))
             continue
         batches.setdefault(contact, []).append(task)
     remaining = []
@@ -1025,6 +1078,8 @@ def handle_voice_transcribe_batch(contact, tasks, args):
     tasks = sorted(tasks, key=lambda item: int(item.get("createdAt") or 0), reverse=True)
     rule = resolve_contact_rule(contact)
     try:
+        for task in tasks:
+            report_task_status(task, "transcribing", f"opening {rule['target']}", task.get("attempts", 0))
         with SEND_LOCK:
             result = run_voice_transcribe_worker(rule["target"], rule, len(tasks), args)
         debug = result.get("debug") if isinstance(result, dict) else None
@@ -1042,6 +1097,7 @@ def handle_voice_transcribe_batch(contact, tasks, args):
         for index, text in enumerate(texts):
             if index < len(tasks):
                 remember_processed(tasks[index]["id"], rule["target"], text)
+                report_task_status(tasks[index], "transcribed", text[:500], tasks[index].get("attempts", 0))
             append_history(contact, text, f"voice-transcribed: {result['actual_title']}")
             upload_transcription(args, contact, text)
             send_receipt(args.receipt_url, "BarkBridge 语音已转文字", f"{contact}\n{text[:500]}")
@@ -1081,8 +1137,10 @@ def retry_voice_tasks(tasks, contact, reason, max_attempts=1):
         if task["attempts"] > max_attempts:
             status = f"voice-transcribe-failed: {reason}"
             remember_processed(task.get("id"), contact, status)
+            report_task_status(task, "failed", reason, task["attempts"])
         else:
             remaining.append(task)
+            report_task_status(task, "retry", reason, task["attempts"])
         append_history(contact, task["text"], status)
     return remaining
 

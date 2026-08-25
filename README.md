@@ -63,6 +63,20 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 
 ## 最新变化 / What's New
 
+### 当前开发进展 / Current Development
+
+- 自托管中继新增任务状态表和 `/api/tasks`、`/api/task/status` 接口，用于记录每条回复/语音任务的 `queued`、`claimed`、`processing`、`sending`、`sent`、`retry`、`failed` 等状态。
+- Mac relay 会在领取任务、打开联系人、发送成功、人工确认、失败重试和最终失败时回写状态，中继管理页可看到完整处理链路。
+- iPhone 聊天面板中的发出消息会随 Mac relay 回写同步更新状态，不再只停留在 `queued`。
+- 语音转文字任务进入独立队列管理，每条语音任务都有单独状态、重试次数和失败原因，降低连续语音遗漏风险。
+- 为避免重复发送，失败重试仍优先使用 Mac 本地 pending 队列，服务端负责可观测状态而不重复派发同一任务。
+
+- The self-hosted relay now has a task-status table plus `/api/tasks` and `/api/task/status` endpoints for per-task states such as `queued`, `claimed`, `processing`, `sending`, `sent`, `retry`, and `failed`.
+- Mac relay reports state transitions when it claims a task, opens a contact, sends successfully, falls back to manual review, retries, or finally fails.
+- Outgoing messages in the iPhone chat panel now receive Mac relay status updates instead of staying at `queued`.
+- Voice-to-text tasks are tracked individually with status, retry count, and failure reason, reducing missed consecutive voice-message transcriptions.
+- To avoid duplicate sends, failed retries still use the Mac local pending queue first, while the relay records observability state instead of dispatching the same task twice.
+
 ### v1.3.13
 
 - 新增自托管中继管理页 `/admin?secret=...`，集中显示中继、Android 上传、Mac 轮询、Mac 状态回传、待处理队列和最近错误。

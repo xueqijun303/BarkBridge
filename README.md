@@ -1,4 +1,4 @@
-# BarkBridge v1.3.13
+# BarkBridge v1.3.14
 
 BarkBridge 是一款 Android 工具，可以把选定的微信通知和来电事件转发到 Bark。
 
@@ -6,13 +6,13 @@ BarkBridge is an Android utility that forwards selected WeChat notifications and
 
 ## 当前状态 / Current Status
 
-- 当前稳定版本：`v1.3.13`。
+- 当前稳定版本：`v1.3.14`。
 - Android 端已切换到阿里云自托管中继，默认地址为 `http://47.101.153.215:8787`。
 - iPhone 端统一使用 `/chat` 聊天/回复页面查看完整消息、选择联系人和提交回复。
 - Mac 端通过轮询中继服务接收回复指令，并使用 Mac 微信客户端代发。
 - 自托管中继已验证 `/chat`、`/admin`、`/settings`、`/control`、`/api/status` 和 `/health` 可用。
 
-- Current stable version: `v1.3.13`.
+- Current stable version: `v1.3.14`.
 - Android now uses the Aliyun self-hosted relay by default at `http://47.101.153.215:8787`.
 - iPhone uses the unified `/chat` page to view full messages, choose contacts, and submit replies.
 - Mac polls the relay service for reply commands and sends them through Mac WeChat.

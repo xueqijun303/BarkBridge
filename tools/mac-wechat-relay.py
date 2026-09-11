@@ -1961,18 +1961,12 @@ def chat_body_crop(bounds):
 
 def ensure_wechat_frontmost():
     script = r'''
-tell application "WeChat"
-  activate
-  try
-    reopen
-  end try
-end tell
-delay 0.8
 tell application "System Events"
-  try
-    set frontmost of process "WeChat" to true
-  end try
-  delay 0.4
+  if not (exists process "WeChat") then
+    error "WeChat process is not running"
+  end if
+  set frontmost of process "WeChat" to true
+  delay 0.2
   set frontApp to name of first application process whose frontmost is true
 end tell
 return frontApp
@@ -2181,15 +2175,10 @@ def osascript_bin():
 def get_wechat_window_bounds():
     script = r'''
 on run argv
-  tell application "WeChat"
-    activate
-    try
-      reopen
-    end try
-  end tell
-  delay 1
-
   tell application "System Events"
+    if not (exists process "WeChat") then
+      error "WeChat process is not running"
+    end if
     tell process "WeChat"
       set frontmost to true
       key code 53
@@ -2227,7 +2216,7 @@ on run argv
   end tell
 end run
 '''
-    result = subprocess.run([osascript_bin(), "-e", script], check=True, capture_output=True, text=True, timeout=10)
+    result = subprocess.run([osascript_bin(), "-e", script], check=True, capture_output=True, text=True, timeout=25)
     parts = [int(float(part.strip())) for part in result.stdout.strip().split(",")]
     if len(parts) != 4:
         raise RuntimeError(f"unexpected WeChat window bounds: {result.stdout!r}")

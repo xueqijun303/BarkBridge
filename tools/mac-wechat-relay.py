@@ -47,6 +47,8 @@ RELAY_STATUS = {
     "last_voice_debug": "",
     "voice_worker_last_at": "",
     "voice_worker_last_result": "",
+    "loop_timeout": None,
+    "voice_worker_timeout": None,
 }
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CLICK_HELPER_SOURCE = os.path.join(SCRIPT_DIR, "mac-click.swift")
@@ -124,9 +126,9 @@ def main():
     parser.add_argument("--voice-probe-timeout", type=float, default=0.8, help="Seconds to wait after each voice click probe.")
     parser.add_argument("--voice-final-timeout", type=float, default=5.0, help="Seconds to wait after clicking the voice-to-text menu item.")
     parser.add_argument("--voice-left-click-first", action="store_true", help="Try left-click OCR probes before the context-menu path. Disabled by default to avoid long OCR scans.")
-    parser.add_argument("--voice-worker-timeout", type=int, default=35, help="Hard timeout in seconds for the isolated voice UI worker process.")
+    parser.add_argument("--voice-worker-timeout", type=int, default=60, help="Hard timeout in seconds for the isolated voice UI worker process.")
     parser.add_argument("--voice-debug-dir", default=VOICE_DEBUG_DIR, help="Directory for failed voice-to-text screenshots and OCR diagnostics.")
-    parser.add_argument("--loop-timeout", type=int, default=45, help="Hard timeout in seconds for one poll/process loop.")
+    parser.add_argument("--loop-timeout", type=int, default=45, help="Hard timeout in seconds for one poll/process loop. Automatically raised when voice transcription needs more time.")
     parser.add_argument("--max-retries", type=int, default=5, help="Maximum local retry attempts for failed sends.")
     parser.add_argument("--send-shortcut", choices=["enter", "cmd-enter", "both"], default="both", help="WeChat send shortcut to use after pasting the reply.")
     parser.add_argument("--web-host", default="127.0.0.1", help="Local web console host.")
@@ -141,6 +143,7 @@ def main():
 
     configure_status_reporting(args)
     configure_poll_mode(args)
+    configure_loop_timeout(args)
     print(f"relay config: poll={args.poll_url} receipt={args.receipt_url or '-'}", flush=True)
 
     last_poll_error = ""
@@ -893,6 +896,16 @@ def configure_poll_mode(args):
         update_status(worker_wait_ms=args.worker_wait_ms, poll_timeout=args.poll_timeout, poll_mode="manual")
 
 
+def configure_loop_timeout(args):
+    poll_budget = max(int(getattr(args, "poll_timeout", 35) or 35), int(getattr(args, "worker_wait_ms", 0) or 0) // 1000 + 10)
+    voice_budget = int(getattr(args, "voice_worker_timeout", 60) or 60) if voice_transcribe_enabled(args) else 0
+    minimum = max(45, poll_budget + voice_budget + 20)
+    if int(getattr(args, "loop_timeout", 45) or 45) < minimum:
+        args.loop_timeout = minimum
+        print(f"loop: raised loop timeout to {args.loop_timeout}s for poll={poll_budget}s voice={voice_budget}s", flush=True)
+    update_status(loop_timeout=args.loop_timeout, voice_worker_timeout=args.voice_worker_timeout)
+
+
 def worker_supports_wait_ms(poll_url):
     request = urllib.request.Request(with_query_param(poll_url, "waitMs", "0"), headers={"User-Agent": "BarkBridge-MacRelay/1.0"})
     start = time.time()
@@ -1162,7 +1175,8 @@ def run_voice_transcribe_worker(target, rule, count, args):
         "voice_debug_dir": os.path.expanduser(getattr(args, "voice_debug_dir", "") or VOICE_DEBUG_DIR),
     }
     command = [sys.executable, os.path.abspath(__file__), "--voice-worker"]
-    timeout = max(8, int(getattr(args, "voice_worker_timeout", 35) or 35))
+    base_timeout = max(8, int(getattr(args, "voice_worker_timeout", 60) or 60))
+    timeout = base_timeout + max(0, int(count) - 1) * 20
     try:
         result = subprocess.run(
             command,

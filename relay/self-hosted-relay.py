@@ -983,6 +983,7 @@ class RelayHandler(BaseHTTPRequestHandler):
             "last_identified_title", "pending_count", "processed_count", "failure_counts",
             "reported_at", "process_id", "voice_transcribe_enabled", "voice_debug_dir",
             "last_voice_debug", "voice_worker_last_at", "voice_worker_last_result",
+            "loop_timeout", "voice_worker_timeout",
         }
         clean = {key: status.get(key) for key in allowed if key in status}
         self.server.store.set_meta("macStatus", clean)
